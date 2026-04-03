@@ -6,10 +6,9 @@ Uses RAG over Qdrant medical KB for context-aware triage.
 Returns top-3 differential diagnoses with triage level.
 """
 from langchain_qdrant import QdrantVectorStore
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from config import llm, QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION, EMBEDDING_MODEL, OPENAI_API_KEY
+from config import llm, QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION, create_embeddings
 from services.doctor_finder import find_doctors
 from state import MedMASState
 
@@ -34,7 +33,7 @@ Rules:
 """
 
 # Lazy-loaded Qdrant store (initialized on first use)
-_embeddings    = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=OPENAI_API_KEY)
+_embeddings    = create_embeddings()
 _qdrant_store  = None
 _retriever     = None
 
