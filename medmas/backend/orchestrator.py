@@ -6,7 +6,7 @@ from state import MedMASState, initial_state
 from config import llm
 from agents.crisis_guard    import crisis_guard_node
 from agents.multilingual    import language_detector_node, multilingual_output_node
-from agents.symptom_checker import symptom_checker_node
+from agents.symptom_checker_v2 import symptom_checker_node
 from agents.disease_predictor import disease_predictor_node
 from agents.empathy_chatbot import empathy_chatbot_node
 from agents.health_scorer   import health_scorer_node
@@ -214,12 +214,27 @@ def response_aggregator_node(state: MedMASState) -> dict:
         r = state["symptom_result"]
         parts.append("SYMPTOM ASSESSMENT")
         parts.append("=" * 40)
+        structured = r.get("structured_symptoms") or {}
+        if structured.get("primary_symptoms"):
+            parts.append(f"Primary Symptoms: {', '.join(structured['primary_symptoms'])}")
+        if structured.get("duration") and structured.get("duration") != "unknown":
+            parts.append(f"Duration: {structured['duration']}")
+        if structured.get("severity") and structured.get("severity") != "unknown":
+            parts.append(f"Severity: {structured['severity'].upper()}")
+        if structured.get("risk_factors"):
+            parts.append(f"Risk Factors: {', '.join(structured['risk_factors'])}")
         for i, d in enumerate(r.get("diagnoses", []), 1):
             parts.append(f"{i}. {d['condition']} ({d['likelihood']} likelihood)")
             parts.append(f"   {d['reason']}")
         parts.append(f"\nTriage Level: {r.get('triage_level', 'routine').upper()}")
+        if r.get("confidence_summary"):
+            parts.append(f"Confidence: {str(r['confidence_summary']).upper()}")
         if r.get("red_flags"):
             parts.append(f"Red Flags: {', '.join(r['red_flags'])}")
+        if r.get("follow_up_questions"):
+            parts.append("Follow-up Questions:")
+            for question in r["follow_up_questions"][:3]:
+                parts.append(f"  - {question}")
         parts.append(f"\nNext Steps: {r.get('next_steps', '')}")
 
     # Disease result

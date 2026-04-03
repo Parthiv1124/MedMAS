@@ -8,6 +8,7 @@ It is focused on:
 
 - current end-to-end product flow
 - actual frontend and backend responsibilities
+- newly added speech-to-text chat flow
 - LangGraph orchestration behavior
 - location and provider discovery
 - data and retrieval boundaries
@@ -23,6 +24,7 @@ MedMAS currently consists of:
 - a LangGraph orchestration layer in `backend/orchestrator.py`
 - specialist health agents
 - DeepInfra-backed model access
+- DeepInfra-backed speech-to-text via `openai/whisper-large-v3`
 - Supabase persistence and auth
 - Nominatim reverse geocoding
 - OpenStreetMap-based nearby doctor lookup
@@ -59,9 +61,13 @@ flowchart LR
     AG5 --> DI
     AG6 --> DI
 
+    FE --> STT[Browser Audio Recording]
+    STT --> API
+
     API --> SUPA[Supabase]
     API --> OSM[Nominatim Geocode]
     API --> TW[Twilio]
+    API --> STTM[DeepInfra Whisper STT]
 ```
 
 ## Repository Shape
@@ -115,6 +121,8 @@ It currently owns:
 - message state
 - district list loading
 - browser geolocation
+- browser microphone capture via `MediaRecorder`
+- speech transcription request flow
 - geocode fallback messaging
 - chat request submission
 - triage and doctor-card rendering
@@ -132,10 +140,13 @@ flowchart TD
     E --> G[Resolve district]
     G --> H[Store active district]
     F --> H
-    H --> I[User submits patient or ASHA message]
-    I --> J[POST /api/chat or /api/asha/assess]
-    J --> K[Receive structured response]
-    K --> L[Render answer triage and doctors]
+    H --> I[User types or records message]
+    I -->|voice| J[POST /api/transcribe]
+    J --> K[Insert transcribed text into composer]
+    I -->|text submit| L[POST /api/chat or /api/asha/assess]
+    K --> L
+    L --> M[Receive structured response]
+    M --> N[Render answer triage and doctors]
 ```
 
 ### Frontend assessment
@@ -145,16 +156,18 @@ Strengths:
 - straightforward user flow
 - graceful location fallback
 - backend returns UI-usable metadata
+- voice input is now supported without changing the main chat contract
 
 Weaknesses:
 
 - `Chat.jsx` is too large
 - there is no dedicated frontend API layer
-- there is no separation between location, chat, and rendering concerns
+- there is no separation between location, voice, chat, and rendering concerns
 
 Recommended split:
 
 - `hooks/useLocationDistrict`
+- `hooks/useSpeechToText`
 - `hooks/useChatApi`
 - `components/chat/MessageList`
 - `components/chat/Composer`
@@ -176,6 +189,7 @@ It currently owns:
 
 - chat endpoint
 - lab upload endpoint
+- audio transcription endpoint
 - doctor endpoint
 - nearby doctor endpoint
 - geocode and district endpoints
@@ -199,6 +213,7 @@ backend/
   app/
     api/
       chat.py
+      transcription.py
       auth.py
       location.py
       doctors.py
@@ -271,6 +286,8 @@ More concretely, the runtime path today is:
 - `response_aggregator`
 - `multilingual_output`
 
+Speech-to-text is currently outside the LangGraph path. It happens before `/api/chat` and simply converts browser audio into text.
+
 ### Strengths
 
 - clear runtime graph
@@ -330,6 +347,39 @@ sequenceDiagram
     FE-->>U: render answer and metadata
 ```
 
+## End-to-End Voice Chat Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as Frontend
+    participant API as FastAPI
+    participant STT as DeepInfra Whisper
+    participant ORCH as LangGraph
+
+    U->>FE: Tap mic and record speech
+    FE->>FE: MediaRecorder captures audio blob
+    FE->>API: POST /api/transcribe
+    API->>STT: audio.transcriptions.create(model=openai/whisper-large-v3)
+    STT-->>API: transcript text
+    API-->>FE: transcribed text
+    FE->>FE: insert transcript into composer
+    U->>FE: submit transcript
+    FE->>API: POST /api/chat
+    API->>ORCH: run_pipeline
+    ORCH-->>API: final state
+    API-->>FE: structured response
+    FE-->>U: render answer and doctor metadata
+```
+
+### Voice Flow Notes
+
+- browser audio is recorded in the frontend using `MediaRecorder`
+- the frontend uploads recorded audio as `multipart/form-data`
+- backend transcription is handled by `POST /api/transcribe`
+- STT is provider-backed, but intentionally decoupled from the LangGraph runtime
+- the transcript becomes plain chat input after transcription completes
+
 ### Core takeaway
 
 Today, MedMAS behaves like:
@@ -369,6 +419,7 @@ Current main data sources:
 Current retrieval/provider behavior:
 
 - symptom flows can use the local medical knowledge base
+- speech transcription uses DeepInfra's OpenAI-compatible audio API
 - doctor discovery prefers live OSM lookup when `user_lat/user_lng` is present
 - doctor discovery falls back to `data/doctors.csv` by district and specialty
 
@@ -422,6 +473,7 @@ Good:
 - safe fallback
 - easy to explain
 - supports both live-location and district-only flows
+- coordinates are already sent through patient and ASHA chat requests
 
 Weak:
 
@@ -449,6 +501,19 @@ Main concerns:
 - persistence logic embedded directly in API handlers
 - OTP state is kept in process memory, so it is not durable across restarts
 
+## Current Feature Set
+
+As of the current implementation, the main user-visible capabilities are:
+
+- multilingual text chat
+- speech-to-text-assisted chat input
+- live-location-assisted district detection
+- doctor lookup with OSM-first fallback
+- lab PDF upload analysis
+- ASHA field assessment workflow
+- OTP-backed signup and Supabase login
+- reminders and history APIs
+
 ## Main Architectural Gaps
 
 1. repo root is not aligned with app root
@@ -457,7 +522,8 @@ Main concerns:
 4. retrieval architecture needs stronger versioning
 5. frontend chat page is too large
 6. memory and state are still request-scoped in practice
-7. platform engineering discipline is thin
+7. speech-to-text is integrated, but still lacks retries, fallbacks, and transcript confidence handling
+8. platform engineering discipline is thin
 
 ## Recommended Improvement Roadmap
 
@@ -475,6 +541,7 @@ Main concerns:
 2. validate provider config at startup
 3. formalize retrieval metadata and migrations
 4. move persistence behind service or repository boundaries
+5. add STT-specific error handling and browser compatibility fallbacks
 
 ### Phase 3: Real multi-agent evolution
 

@@ -127,6 +127,12 @@ function getDoctorMapsUrl(doctor, district) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`;
 }
 
+function formatLabel(text) {
+  return String(text || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
 export default function Chat() {
   const navigate = useNavigate();
   const [messages, setMessages]       = useState([]);
@@ -239,6 +245,7 @@ export default function Chat() {
         triage: data.triage_level, intent: data.intent,
         crisis: data.crisis_detected, doctors: data.doctor_list,
         lang: data.original_language,
+        symptomResult: data.symptom_result || null,
       }]);
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
@@ -450,6 +457,8 @@ export default function Chat() {
               const agent = msg.intent && AGENT_INFO[msg.intent];
               const triage = msg.triage && TRIAGE[msg.triage];
               const visibleText = getVisibleMessageText(msg.text, msg.doctors);
+              const symptom = msg.symptomResult;
+              const structuredSymptoms = symptom?.structured_symptoms;
 
               return (
                 <motion.div
@@ -502,6 +511,81 @@ export default function Chat() {
                     }`}>
                       {visibleText && (
                         <p className="whitespace-pre-wrap">{visibleText}</p>
+                      )}
+
+                      {symptom && (
+                        <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                            Symptom Insights
+                          </p>
+
+                          {structuredSymptoms?.primary_symptoms?.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {structuredSymptoms.primary_symptoms.map(item => (
+                                <span key={item} className="rounded-full bg-sky-50 px-2 py-1 text-[10px] font-medium text-sky-700">
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {structuredSymptoms?.duration && structuredSymptoms.duration !== "unknown" && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Duration:</span>{" "}
+                                <span className="text-neutral-600">{structuredSymptoms.duration}</span>
+                              </div>
+                            )}
+                            {structuredSymptoms?.severity && structuredSymptoms.severity !== "unknown" && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Severity:</span>{" "}
+                                <span className="text-neutral-600">{formatLabel(structuredSymptoms.severity)}</span>
+                              </div>
+                            )}
+                            {symptom?.confidence_summary && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Confidence:</span>{" "}
+                                <span className="text-neutral-600">{formatLabel(symptom.confidence_summary)}</span>
+                              </div>
+                            )}
+                            {symptom?.recommended_specialty && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Suggested Specialty:</span>{" "}
+                                <span className="text-neutral-600">{symptom.recommended_specialty}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {structuredSymptoms?.risk_factors?.length > 0 && (
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                                Risk Factors
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {structuredSymptoms.risk_factors.map(item => (
+                                  <span key={item} className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700">
+                                    {item}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {symptom?.follow_up_questions?.length > 0 && (
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                                Follow-up Questions
+                              </p>
+                              <div className="space-y-1">
+                                {symptom.follow_up_questions.slice(0, 3).map(question => (
+                                  <div key={question} className="rounded-lg bg-white/50 px-3 py-2 text-[11px] text-neutral-700">
+                                    {question}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
 
                       {/* Doctor cards */}

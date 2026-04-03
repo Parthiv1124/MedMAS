@@ -64,6 +64,7 @@ class ChatResponse(BaseModel):
     doctor_list:       list = []
     health_score:      Optional[int] = None
     crisis_detected:   bool = False
+    symptom_result:    Optional[dict] = None
 
 
 class TranscriptionResponse(BaseModel):
@@ -124,6 +125,7 @@ async def chat(req: ChatRequest):
         doctor_list=result.get("doctor_list") or [],
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
+        symptom_result=result.get("symptom_result"),
     )
 
 @app.post("/api/upload-lab")
