@@ -19,6 +19,17 @@ const AGENT_INFO = {
   offtopic:  { label: "MedMAS Assistant",  icon: "M+", color: "from-slate-500 to-gray-400" },
 };
 
+const TAB_STYLES = {
+  chat: {
+    active: "border-sky-300/80 bg-gradient-to-r from-sky-500 to-cyan-400 text-white shadow-[0_10px_30px_rgba(14,165,233,0.28)]",
+    dot: "bg-sky-100",
+  },
+  asha: {
+    active: "border-amber-300/80 bg-gradient-to-r from-amber-500 to-yellow-400 text-white shadow-[0_10px_30px_rgba(245,158,11,0.28)]",
+    dot: "bg-amber-100",
+  },
+};
+
 const TRIAGE = {
   urgent:   { bg: "bg-red-500/10",    text: "text-red-400",     border: "border-red-500/20",    dot: "bg-red-500" },
   moderate: { bg: "bg-amber-500/10",   text: "text-amber-400",   border: "border-amber-500/20",  dot: "bg-amber-500" },
@@ -131,6 +142,12 @@ function formatLabel(text) {
   return String(text || "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function getLocationBadgeClasses(status) {
+  if (status === "live") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "detecting") return "border-sky-200 bg-sky-50 text-sky-700";
+  return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
 export default function Chat() {
@@ -308,41 +325,54 @@ export default function Chat() {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="relative flex h-screen w-full flex-col overflow-hidden bg-chat-grid">
+    <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-chat-grid">
 
       {/* ── Header ──────────────────────────────────────────── */}
       <header className="glass-liquid sticky top-0 z-30 border-b border-white/35">
-        <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-3">
+        <div className="mx-auto flex max-w-4xl items-center gap-3 px-3 py-3 sm:gap-4 sm:px-4">
           {/* Logo */}
-          <div className="flex items-center gap-3">
+          <div className="min-w-0 flex items-center gap-3">
             <img src={logo} alt="MedMAS" className="h-9 w-9 rounded-xl shadow-md" />
-            <div className="hidden sm:block">
+            <div className="min-w-0 hidden sm:block">
               <h1 className="text-sm font-bold leading-tight text-neutral-900">MedMAS</h1>
               <p className="text-[10px] leading-tight text-neutral-500">Multi-Agent AI Health System</p>
             </div>
           </div>
 
           {/* Tabs */}
-          <div className="glass-liquid ml-2 flex rounded-xl p-0.5">
+          <div className="glass-liquid ml-1 flex shrink-0 rounded-2xl p-1 sm:ml-2">
             {[
               { id: "chat", label: "Patient", emoji: "\uD83E\uDE7A" },
               { id: "asha", label: "ASHA",    emoji: "\uD83D\uDC69\u200D\u2695\uFE0F" },
             ].map(t => (
+              (() => {
+                const isActive = tab === t.id;
+                const styles = TAB_STYLES[t.id];
+                return (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
-                  tab === t.id
-                    ? "glass-liquid-strong text-neutral-900 shadow-sm"
-                    : "text-neutral-600 hover:text-neutral-900"
+                aria-pressed={isActive}
+                  className={`relative flex min-w-[64px] items-center justify-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 sm:min-w-[88px] sm:px-3.5 sm:text-xs ${
+                  isActive
+                    ? `${styles.active} -translate-y-0.5`
+                    : "border-transparent text-neutral-600 hover:border-white/50 hover:bg-white/50 hover:text-neutral-900"
                 }`}>
-                <span className="mr-1">{t.emoji}</span>{t.label}
-              </button>
+                  <span className="text-sm">{t.emoji}</span>
+                  <span>{t.label}</span>
+                  <span
+                    className={`absolute -bottom-1.5 h-1.5 w-8 rounded-full transition-all ${
+                      isActive ? styles.dot : "bg-transparent"
+                    }`}
+                  />
+                </button>
+                );
+              })()
             ))}
           </div>
 
-          {/* District + User */}
-          <div className="ml-auto flex items-center gap-2">
+            {/* District + User */}
+            <div className="ml-auto flex min-w-0 items-center gap-2">
             <div className="glass-liquid hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-neutral-500 sm:flex">
               <LocationIcon />
               {locationStatus === "detecting" ? (
@@ -357,7 +387,7 @@ export default function Chat() {
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               {user && (
                 <div className="glass-liquid hidden items-center gap-2 rounded-lg px-2.5 py-1.5 md:flex">
                   <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-teal-500 text-[9px] font-bold text-white">
@@ -375,6 +405,19 @@ export default function Chat() {
             </div>
           </div>
         </div>
+        <div className="mx-auto flex w-full max-w-4xl items-center gap-2 px-3 pb-3 sm:hidden">
+          <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${getLocationBadgeClasses(locationStatus)}`}>
+            <LocationIcon />
+            <span>{locationStatus === "live" ? "Live" : locationStatus === "detecting" ? "Detecting" : "Manual"}</span>
+          </div>
+          <select
+            value={district}
+            onChange={e => setDistrict(e.target.value)}
+            className="glass-liquid min-w-0 flex-1 rounded-full px-3 py-1.5 text-[11px] font-medium text-neutral-900 focus:outline-none"
+          >
+            {districts.map(d => <option key={d}>{d}</option>)}
+          </select>
+        </div>
       </header>
 
       {/* ── Agent Status Bar ────────────────────────────────── */}
@@ -384,7 +427,7 @@ export default function Chat() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="mx-auto w-full max-w-4xl px-4 pt-3">
+            className="mx-auto w-full max-w-4xl px-3 pt-3 sm:px-4">
             <div className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 ${
               agentInfo
                 ? "glass-liquid-accent border-sky-100/60"
@@ -414,8 +457,8 @@ export default function Chat() {
       </AnimatePresence>
 
       {/* ── Messages ────────────────────────────────────────── */}
-      <div className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-4">
-        <div className="flex w-full max-w-4xl flex-col gap-4 px-4 pb-4">
+      <div className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-3 sm:pt-4">
+        <div className="flex w-full max-w-4xl flex-col gap-4 px-3 pb-24 sm:px-4 sm:pb-28">
 
           {/* Empty state */}
           <AnimatePresence>
@@ -424,7 +467,7 @@ export default function Chat() {
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 1.05 }}
-                className="flex flex-col items-center justify-center py-16">
+                className="flex flex-col items-center justify-center py-12 sm:py-16">
                 <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500/10 to-teal-500/10">
                   <span className="text-3xl">{tab === "asha" ? "\uD83D\uDC69\u200D\u2695\uFE0F" : "\uD83E\uDE7A"}</span>
                 </div>
@@ -465,7 +508,7 @@ export default function Chat() {
                   key={msg.id}
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+                  className={`flex gap-2 sm:gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
 
                   {/* Bot avatar */}
                   {!isUser && (
@@ -476,7 +519,7 @@ export default function Chat() {
                     </div>
                   )}
 
-                  <div className="max-w-[80%]">
+                  <div className="max-w-[88%] sm:max-w-[80%]">
                     {/* Crisis banner */}
                     {msg.crisis && (
                       <div className="mb-2 flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 pulse-danger">
@@ -504,7 +547,7 @@ export default function Chat() {
                     )}
 
                     {/* Bubble */}
-                    <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    <div className={`rounded-2xl px-3 py-3 text-sm leading-relaxed sm:px-4 ${
                       isUser
                         ? "glass-liquid-accent rounded-tr-none border border-white/60 text-neutral-950"
                         : "glass-liquid rounded-tl-none border border-white/50 text-neutral-950"
@@ -605,24 +648,28 @@ export default function Chat() {
                               onClick={event => {
                                 if (!mapsUrl) event.preventDefault();
                               }}
-                              className="glass-liquid flex items-center gap-2.5 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40"
+                              className="glass-liquid flex flex-col gap-2 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40 sm:flex-row sm:items-center sm:gap-2.5"
                             >
-                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
-                                {(d.name || "D")[0]}
+                              <div className="flex w-full items-start gap-2.5 sm:w-auto sm:items-center">
+                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
+                                  {(d.name || "D")[0]}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
+                                  <p className="text-[10px] text-neutral-500">
+                                    {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ""}
+                                  </p>
+                                  {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
+                                </div>
                               </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
-                                <p className="text-[10px] text-neutral-500">
-                                  {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ""}
-                                </p>
-                                {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
-                              </div>
-                              <div className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
-                                {d.phone && <><PhoneIcon />{d.phone}</>}
-                              </div>
-                              <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
-                                <span>Map</span>
-                                <ArrowUpRightIcon />
+                              <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
+                                <div className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
+                                  {d.phone && <><PhoneIcon />{d.phone}</>}
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
+                                  <span>Map</span>
+                                  <ArrowUpRightIcon />
+                                </div>
                               </div>
                             </a>
                             );
@@ -684,13 +731,13 @@ export default function Chat() {
       />
 
       {/* ── Footer info ─────────────────────────────────────── */}
-      <div className="glass-liquid flex items-center justify-between border-t border-white/35 px-4 py-1.5">
-        <div className="mx-auto flex w-full max-w-4xl items-center justify-between">
+      <div className="glass-liquid flex items-center justify-between border-t border-white/35 px-3 py-2 sm:px-4 sm:py-1.5">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-1.5">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             <span className="text-[10px] text-neutral-400">6 agents online</span>
           </div>
-          <p className="text-[10px] text-neutral-400">
+          <p className="text-[10px] text-neutral-400 sm:text-right">
             Always consult a doctor before acting on this information · Emergency: 112
           </p>
         </div>
