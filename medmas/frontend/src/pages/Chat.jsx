@@ -8,7 +8,7 @@ import { LuBrain } from "react-icons/lu";
 import { PiLightbulbFilament } from "react-icons/pi";
 import logo from "../assets/logo.png";
 
-// ── Session localStorage helpers ────────────────────────────────────────────
+// Session localStorage helpers
 const SESSIONS_KEY = "medmas_sessions";
 const msgKey = (id) => `medmas_session_${id}`;
 
@@ -27,7 +27,7 @@ function readMessages(sessionId) {
   catch { return []; }
 }
 function appendMessages(sessionId, newMsgs) {
-  // Blob URLs expire — strip before persisting
+  // Blob URLs expire; strip before persisting
   const safe = newMsgs.map((m) => ({
     ...m,
     files: m.files?.map((f) => ({ ...f, url: null })) ?? undefined,
@@ -67,6 +67,25 @@ const TAB_STYLES = {
   },
 };
 
+const TAB_META = {
+  chat: {
+    badge: "Patient Care",
+    title: "Clinical Assistant",
+    description: "Symptom triage, doctor discovery, and clear next-step guidance in one conversation.",
+    icon: "\uD83E\uDE7A",
+    accent: "from-sky-500/20 via-cyan-400/12 to-white/0",
+    badgeClass: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+  asha: {
+    badge: "Field Workflow",
+    title: "ASHA Field Desk",
+    description: "Queue-based patient assessment for village outreach, escalation, and follow-up.",
+    icon: "\uD83D\uDC69\u200D\u2695\uFE0F",
+    accent: "from-amber-500/20 via-yellow-400/14 to-white/0",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+};
+
 const TRIAGE = {
   urgent: { bg: "bg-red-500/10", text: "text-red-400", border: "border-red-500/20", dot: "bg-red-500" },
   moderate: { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20", dot: "bg-amber-500" },
@@ -94,7 +113,7 @@ const QUICK_PROMPTS = {
   ],
 };
 
-/* ── Inline Icons ──────────────────────────────────────────── */
+/* Inline Icons */
 const LogoutIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
@@ -218,20 +237,16 @@ export default function Chat() {
     notes: "",
   });
   const bottomRef                         = useRef(null);
-  const [locationHint, setLocationHint] = useState("");
-  const [userCoords, setUserCoords] = useState(null); // {lat, lng}
-  const [tab, setTab] = useState("chat");
-  const bottomRef = useRef(null);
 
-  // ── Sidebar / session state ────────────────────────────────────────────────
+  // Sidebar / session state
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sessions, setSessions] = useState(() => readSessions());
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const currentSessionRef = useRef(null); // mirror for async closures
 
-  // ── Session helpers ────────────────────────────────────────────────────────
+  // Session helpers
   const persistExchange = useCallback((sessionId, userMsg, assistantMsg) => {
-    // Append only the NEW pair — avoids re-reading stale data or double-writing
+    // Append only the new pair; avoids re-reading stale data or double-writing
     appendMessages(sessionId, [userMsg, assistantMsg]);
     setSessions((prev) => {
       const now = new Date().toISOString();
@@ -470,10 +485,8 @@ export default function Chat() {
     }
   }
 
-  async function sendMessage(text) {
-    setMessages(prev => [...prev, { id: Date.now(), role: "user", text }]);
   function buildChatHistory(currentMessages, limit = 20) {
-    // Send the last `limit` messages as context — backend agents further slice internally
+    // Send the last `limit` messages as context; backend agents further slice internally
     return currentMessages
       .filter(m => m.text?.trim())
       .slice(-limit)
@@ -500,7 +513,7 @@ export default function Chat() {
 
   async function _doSendMessage(userMsg, files, filePreviews, chatHistory) {
     const { text } = userMsg;
-    // ── Ensure we have a session before hitting the API ──────────────────
+    // Ensure we have a session before hitting the API
     let sessionId = currentSessionRef.current;
     if (!sessionId) {
       sessionId = makeSessionId();
@@ -514,7 +527,7 @@ export default function Chat() {
       currentSessionRef.current = sessionId;
       setCurrentSessionId(sessionId);
       setSessions((prev) => {
-        // New session is most recent — put it first, already sorted
+        // New session is most recent; put it first, already sorted
         const updated = [newSession, ...prev];
         writeSessions(updated);
         return updated;
@@ -562,7 +575,7 @@ export default function Chat() {
       };
       setMessages(prev => [...prev, assistantMsg]);
 
-      // Persist exchange — use the same userMsg object that was given to the UI
+      // Persist exchange using the same userMsg object shown in the UI
       persistExchange(sessionId, userMsg, assistantMsg);
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
@@ -666,7 +679,9 @@ export default function Chat() {
   }
 
   const agentInfo = activeAgent && Object.values(AGENT_INFO).find(a => activeAgent.includes(a.label));
+  const modeMeta = TAB_META[tab];
   const hasMessages = messages.length > 0;
+  const agentCount = Object.keys(AGENT_INFO).length;
   const selectedPatient = ashaPatients.find(
     patient => normalizePatientId(patient.id) === normalizePatientId(selectedPatientId)
   );
@@ -680,7 +695,7 @@ export default function Chat() {
   return (
     <div className="flex h-screen overflow-hidden">
 
-      {/* ── Sidebar ─────────────────────────────────────────── */}
+      {/* Sidebar */}
       <ChatSidebar
         sessions={sessions}
         currentSessionId={currentSessionId}
@@ -691,106 +706,168 @@ export default function Chat() {
         onToggle={() => setSidebarOpen((v) => !v)}
       />
 
-      {/* ── Main area ───────────────────────────────────────── */}
+      {/* Main area */}
       <div className="relative flex flex-1 flex-col overflow-hidden bg-chat-grid">
 
-        {/* ── Header ──────────────────────────────────────────── */}
-        <header className="glass-liquid sticky top-0 z-30 border-b border-white/35">
-          <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-3">
-            {/* Sidebar toggle + Logo */}
-            <div className="flex items-center gap-3">
-              {!sidebarOpen && (
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                  title="Open history"
-                >
-                  <PanelLeft className="h-4 w-4" />
-                </button>
-              )}
-              <img src={logo} alt="MedMAS" className="h-9 w-9 rounded-xl shadow-md" />
-              <div className="min-w-0 hidden sm:block">
-                <h1 className="text-sm font-bold leading-tight text-neutral-900">MedMAS</h1>
-                <p className="text-[10px] leading-tight text-neutral-500">Multi-Agent AI Health System</p>
+        {/* Header */}
+        <header className="sticky top-0 z-30 border-b border-white/35 bg-white/38 backdrop-blur-2xl">
+          <div className="mx-auto flex max-w-5xl flex-col gap-3 px-3 py-3 sm:px-4 sm:py-3.5">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                {!sidebarOpen && (
+                  <button
+                    onClick={() => setSidebarOpen(true)}
+                    className="glass-liquid rounded-xl p-2 text-neutral-500 transition-colors hover:text-neutral-900"
+                    title="Open history"
+                  >
+                    <PanelLeft className="h-4 w-4" />
+                  </button>
+                )}
+                <img src={logo} alt="MedMAS" className="h-10 w-10 rounded-2xl shadow-[0_12px_30px_rgba(37,99,235,0.18)]" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-neutral-500">MedMAS</p>
+                  <h1 className="truncate text-sm font-semibold text-neutral-900 sm:text-base">Multi-Agent Health Console</h1>
+                </div>
               </div>
-            </div>
 
-            {/* Tabs */}
-            <div className="glass-liquid ml-1 flex shrink-0 rounded-2xl p-1 sm:ml-2">
-              {[
-                { id: "chat", label: "Patient", emoji: "\uD83E\uDE7A" },
-                { id: "asha", label: "ASHA", emoji: "\uD83D\uDC69\u200D\u2695\uFE0F" },
-              ].map(t => (
-                (() => {
-                  const isActive = tab === t.id;
-                  const styles = TAB_STYLES[t.id];
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setTab(t.id)}
-                      aria-pressed={isActive}
-                      className={`relative flex min-w-[64px] items-center justify-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 sm:min-w-[88px] sm:px-3.5 sm:text-xs ${isActive
-                          ? `${styles.active} -translate-y-0.5`
-                          : "border-transparent text-neutral-600 hover:border-white/50 hover:bg-white/50 hover:text-neutral-900"
-                        }`}>
-                      <span className="text-sm">{t.emoji}</span>
-                      <span>{t.label}</span>
-                      <span
-                        className={`absolute -bottom-1.5 h-1.5 w-8 rounded-full transition-all ${isActive ? styles.dot : "bg-transparent"
-                          }`}
-                      />
-                    </button>
-                  );
-                })()
-              ))}
-            </div>
+              <div className="order-3 w-full sm:order-2 sm:w-auto">
+                <div className="glass-liquid inline-flex w-full rounded-2xl p-1 sm:w-auto">
+                  {[
+                    { id: "chat", label: "Patient", emoji: "\uD83E\uDE7A" },
+                    { id: "asha", label: "ASHA", emoji: "\uD83D\uDC69\u200D\u2695\uFE0F" },
+                  ].map(t => (
+                    (() => {
+                      const isActive = tab === t.id;
+                      const styles = TAB_STYLES[t.id];
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setTab(t.id)}
+                          aria-pressed={isActive}
+                          className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all duration-200 sm:min-w-[104px] sm:flex-none ${isActive
+                              ? `${styles.active} -translate-y-0.5`
+                              : "border-transparent text-neutral-600 hover:border-white/50 hover:bg-white/50 hover:text-neutral-900"
+                            }`}>
+                          <span className="text-sm">{t.emoji}</span>
+                          <span>{t.label}</span>
+                          <span
+                            className={`absolute -bottom-1.5 h-1.5 w-8 rounded-full transition-all ${isActive ? styles.dot : "bg-transparent"}`}
+                          />
+                        </button>
+                      );
+                    })()
+                  ))}
+                </div>
+              </div>
 
-            {/* District + User */}
-            <div className="ml-auto flex min-w-0 items-center gap-2">
-              <div className="glass-liquid hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-neutral-500 sm:flex">
-                <LocationIcon />
-                {locationStatus === "detecting" ? (
-                  <span className="animate-pulse text-xs font-medium text-neutral-400">Detecting...</span>
-                ) : (
+              <div className="order-2 ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:order-3">
+                <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${getLocationBadgeClasses(locationStatus)}`}>
+                  <LocationIcon />
+                  <span>{locationStatus === "live" ? "Live" : locationStatus === "detecting" ? "Detecting" : "Manual"}</span>
+                </div>
+                <div className="glass-liquid flex min-w-[132px] max-w-full items-center gap-2 rounded-full px-3 py-1.5">
+                  <LocationIcon />
                   <select
                     value={district}
                     onChange={e => setDistrict(e.target.value)}
-                    className="cursor-pointer bg-transparent text-xs font-medium text-neutral-900 focus:outline-none">
+                    className="min-w-0 flex-1 cursor-pointer bg-transparent text-xs font-medium text-neutral-900 focus:outline-none"
+                  >
                     {districts.map(d => <option key={d}>{d}</option>)}
                   </select>
-                )}
-              </div>
-
-              <div className="flex shrink-0 items-center gap-2">
+                </div>
                 {user && (
-                  <div className="glass-liquid hidden items-center gap-2 rounded-lg px-2.5 py-1.5 md:flex">
-                    <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-teal-500 text-[9px] font-bold text-white">
+                  <div className="glass-liquid hidden items-center gap-2 rounded-full px-2.5 py-1.5 lg:flex">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-teal-500 text-[10px] font-bold text-white">
                       {(user.name || user.email || "U")[0].toUpperCase()}
                     </div>
-                    <span className="max-w-[100px] truncate text-xs font-medium text-neutral-900">{user.name || user.email}</span>
+                    <span className="max-w-[130px] truncate text-xs font-medium text-neutral-900">{user.name || user.email}</span>
                   </div>
                 )}
                 <button
                   onClick={handleLogout}
-                  className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
+                  className="glass-liquid rounded-xl p-2 text-neutral-500 transition-colors hover:bg-red-50 hover:text-red-500"
                   title="Logout">
                   <LogoutIcon />
                 </button>
               </div>
             </div>
-          </div>
-          <div className="mx-auto flex w-full max-w-4xl items-center gap-2 px-3 pb-3 sm:hidden">
-            <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${getLocationBadgeClasses(locationStatus)}`}>
-              <LocationIcon />
-              <span>{locationStatus === "live" ? "Live" : locationStatus === "detecting" ? "Detecting" : "Manual"}</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* ── Messages ────────────────────────────────────────── */}
-      <div className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-3 sm:pt-4">
-        <div className="flex w-full max-w-4xl flex-col gap-4 px-3 pb-24 sm:px-4 sm:pb-28">
+            <div className={`glass-liquid overflow-hidden rounded-[28px] border border-white/55 bg-gradient-to-br ${modeMeta.accent} p-4 sm:p-[18px]`}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0">
+                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] ${modeMeta.badgeClass}`}>
+                    <span>{modeMeta.icon}</span>
+                    {modeMeta.badge}
+                  </span>
+                  <h2 className="mt-3 text-xl font-semibold tracking-tight text-neutral-950 sm:text-2xl">
+                    {modeMeta.title}
+                  </h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
+                    {modeMeta.description}
+                  </p>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[360px]">
+                  <div className="rounded-2xl border border-white/60 bg-white/65 px-3 py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">District</p>
+                    <p className="mt-1 text-sm font-semibold text-neutral-900">{district || "Selecting..."}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/60 bg-white/65 px-3 py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">Mode Status</p>
+                    <p className="mt-1 text-sm font-semibold text-neutral-900">
+                      {tab === "asha"
+                        ? (selectedPatient ? "Patient linked" : "Waiting for patient")
+                        : (hasMessages ? "Conversation active" : "Ready")}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/60 bg-white/65 px-3 py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">AI Agents</p>
+                    <p className="mt-1 text-sm font-semibold text-neutral-900">{agentCount} online</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Agent Status Bar */}
+        <AnimatePresence>
+          {(loading || activeAgent) && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mx-auto w-full max-w-5xl px-3 pt-3 sm:px-4">
+              <div className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 ${agentInfo
+                  ? "glass-liquid-accent border-sky-100/60"
+                  : "glass-liquid border-white/40"
+                }`}>
+                {agentInfo ? (
+                  <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br ${agentInfo.color} text-[9px] font-bold text-white shadow-sm`}>
+                    {agentInfo.icon}
+                  </div>
+                ) : (
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-900">
+                    <div className="h-3 w-3 animate-pulse rounded-full bg-brand-500" />
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs font-semibold text-neutral-900">{activeAgent || "Processing..."}</p>
+                  <p className="text-[10px] text-neutral-500">Agent pipeline active</p>
+                </div>
+                <div className="ml-auto flex gap-1">
+                  {[0, 200, 400].map(d => (
+                    <div key={d} className="h-2 w-2 rounded-full bg-brand-400" style={{ animation: "typing 1.4s infinite", animationDelay: `${d}ms` }} />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+      {/* Messages */}
+      <div className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-4 sm:pt-5">
+        <div className="flex w-full max-w-5xl flex-col gap-4 px-3 pb-24 sm:px-4 sm:pb-28">
 
           {tab === "asha" && (
             <div className="glass-liquid space-y-4 rounded-3xl border border-white/45 p-4 shadow-[0_20px_60px_rgba(245,158,11,0.12)]">
@@ -1013,83 +1090,6 @@ export default function Chat() {
               </div>
             </div>
           )}
-
-          {/* Empty state */}
-          <AnimatePresence>
-            {!hasMessages && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                className="flex flex-col items-center justify-center py-12 sm:py-16">
-                <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500/10 to-teal-500/10">
-                  <span className="text-3xl">{tab === "asha" ? "\uD83D\uDC69\u200D\u2695\uFE0F" : "\uD83E\uDE7A"}</span>
-            <select
-              value={district}
-              onChange={e => setDistrict(e.target.value)}
-              className="glass-liquid min-w-0 flex-1 rounded-full px-3 py-1.5 text-[11px] font-medium text-neutral-900 focus:outline-none"
-            >
-              {districts.map(d => <option key={d}>{d}</option>)}
-            </select>
-          </div>
-        </header>
-
-        {/* ── Agent Status Bar ────────────────────────────────── */}
-        <AnimatePresence>
-          {(loading || activeAgent) && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mx-auto w-full max-w-4xl px-3 pt-3 sm:px-4">
-              <div className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 ${agentInfo
-                  ? "glass-liquid-accent border-sky-100/60"
-                  : "glass-liquid border-white/40"
-                }`}>
-                {agentInfo ? (
-                  <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br ${agentInfo.color} text-[9px] font-bold text-white shadow-sm`}>
-                    {agentInfo.icon}
-                  </div>
-                ) : (
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-900">
-                    <div className="h-3 w-3 animate-pulse rounded-full bg-brand-500" />
-                  </div>
-                )}
-                <div>
-                  <p className="text-xs font-semibold text-neutral-900">{activeAgent || "Processing..."}</p>
-                  <p className="text-[10px] text-neutral-500">Agent pipeline active</p>
-                </div>
-                <div className="ml-auto flex gap-1">
-                  {[0, 200, 400].map(d => (
-                    <div key={d} className="h-2 w-2 rounded-full bg-brand-400" style={{ animation: "typing 1.4s infinite", animationDelay: `${d}ms` }} />
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Message bubbles */}
-          <AnimatePresence initial={false}>
-            {messages.map(msg => {
-              const isUser = msg.role === "user";
-              const agent = msg.intent && AGENT_INFO[msg.intent];
-              const triage = msg.triage && TRIAGE[msg.triage];
-              const visibleText = getVisibleMessageText(msg.text, msg.doctors);
-              const symptom = msg.symptomResult;
-              const structuredSymptoms = symptom?.structured_symptoms;
-              const asha = msg.asha;
-              const documentation = asha?.documentation;
-
-              return (
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Messages ────────────────────────────────────────── */}
-        <div className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-3 sm:pt-4">
-          <div className="flex w-full max-w-4xl flex-col gap-4 px-3 pb-24 sm:px-4 sm:pb-28">
-
             {/* Empty state */}
             <AnimatePresence>
               {!hasMessages && (
@@ -1097,24 +1097,24 @@ export default function Chat() {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 1.05 }}
-                  className="flex flex-col items-center justify-center py-12 sm:py-16">
-                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500/10 to-teal-500/10">
+                className="glass-liquid mx-auto flex w-full max-w-3xl flex-col items-center justify-center rounded-[32px] border border-white/60 px-6 py-10 text-center shadow-[0_24px_80px_rgba(15,23,42,0.08)] sm:px-10 sm:py-14">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500/10 to-teal-500/10 shadow-inner">
                     <span className="text-3xl">{tab === "asha" ? "\uD83D\uDC69\u200D\u2695\uFE0F" : "\uD83E\uDE7A"}</span>
                   </div>
                   <h2 className="mb-2 text-lg font-semibold text-neutral-900">
                     {tab === "asha" ? "ASHA Worker Console" : "How can I help you today?"}
                   </h2>
-                  <p className="mb-8 max-w-sm text-center text-sm text-neutral-500">
+                  <p className="mb-8 max-w-xl text-sm leading-6 text-neutral-500">
                     {tab === "asha"
                       ? "Enter patient field observations in any Indian language for AI-assisted triage"
-                      : "Describe your symptoms in any language — Hindi, Tamil, Gujarati, English, and 18+ more"}
+                      : "Describe your symptoms in any language - Hindi, Tamil, Gujarati, English, and 18+ more"}
                   </p>
-                  <div className="flex max-w-lg flex-wrap justify-center gap-2">
+                  <div className="flex max-w-2xl flex-wrap justify-center gap-2">
                     {QUICK_PROMPTS[tab].map((prompt, i) => (
                       <button
                         key={i}
                         onClick={() => handleSend(prompt)}
-                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600 shadow-sm transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:border-brand-600 dark:hover:text-brand-400">
+                        className="rounded-2xl border border-white/70 bg-white/80 px-3 py-2 text-xs font-medium text-neutral-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:bg-brand-50/70 hover:text-brand-700">
                         {prompt}
                       </button>
                     ))}
@@ -1148,12 +1148,12 @@ export default function Chat() {
                       </div>
                     )}
 
-                    <div className="max-w-[88%] sm:max-w-[80%]">
+                    <div className="max-w-[90%] sm:max-w-[82%] lg:max-w-[76%]">
                       {/* Crisis banner */}
                       {msg.crisis && (
                         <div className="mb-2 flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 pulse-danger">
                           <span className="text-sm text-red-500">🚨</span>
-                          <span className="text-xs font-semibold text-red-400">CRISIS DETECTED — emergency resources included below</span>
+                          <span className="text-xs font-semibold text-red-400">CRISIS DETECTED - emergency resources included below</span>
                         </div>
                       )}
 
@@ -1353,6 +1353,35 @@ export default function Chat() {
                           )}
                         </div>
                       )}
+                      {structuredSymptoms?.risk_factors?.length > 0 && (
+                        <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3 dark:border-neutral-700/40">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                            Risk Factors
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {structuredSymptoms.risk_factors.map(item => (
+                              <span key={item} className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {symptom?.follow_up_questions?.length > 0 && (
+                        <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3 dark:border-neutral-700/40">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                            Follow-up Questions
+                          </p>
+                          <div className="space-y-1">
+                            {symptom.follow_up_questions.slice(0, 3).map(question => (
+                              <div key={question} className="rounded-lg bg-white/50 px-3 py-2 text-[11px] text-neutral-700">
+                                {question}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Doctor cards */}
                       {msg.doctors?.length > 0 && (
@@ -1362,105 +1391,46 @@ export default function Chat() {
                             const mapsUrl = getDoctorMapsUrl(d, district);
 
                             return (
-                            <a
-                              key={j}
-                              href={mapsUrl || "#"}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-label={`Open ${d.name || "doctor location"} in Google Maps`}
-                              onClick={event => {
-                                if (!mapsUrl) event.preventDefault();
-                              }}
-                              className="glass-liquid flex flex-col gap-2 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40 sm:flex-row sm:items-center sm:gap-2.5"
-                            >
-                              <div className="flex w-full items-start gap-2.5 sm:w-auto sm:items-center">
-                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
-                                  {(d.name || "D")[0]}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
-                                  <p className="text-[10px] text-neutral-500">
-                                    {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ""}
-                                  </p>
-                                  {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
-                            {structuredSymptoms?.risk_factors?.length > 0 && (
-                              <div>
-                                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                                  Risk Factors
-                                </p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {structuredSymptoms.risk_factors.map(item => (
-                                    <span key={item} className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700">
-                                      {item}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {symptom?.follow_up_questions?.length > 0 && (
-                              <div>
-                                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                                  Follow-up Questions
-                                </p>
-                                <div className="space-y-1">
-                                  {symptom.follow_up_questions.slice(0, 3).map(question => (
-                                    <div key={question} className="rounded-lg bg-white/50 px-3 py-2 text-[11px] text-neutral-700">
-                                      {question}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Doctor cards */}
-                        {msg.doctors?.length > 0 && (
-                          <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3 dark:border-neutral-700/40">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Nearby Doctors</p>
-                            {msg.doctors.slice(0, 3).map((d, j) => {
-                              const mapsUrl = getDoctorMapsUrl(d, district);
-
-                              return (
-                                <a
-                                  key={j}
-                                  href={mapsUrl || "#"}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  aria-label={`Open ${d.name || "doctor location"} in Google Maps`}
-                                  onClick={event => {
-                                    if (!mapsUrl) event.preventDefault();
-                                  }}
-                                  className="glass-liquid flex flex-col gap-2 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40 sm:flex-row sm:items-center sm:gap-2.5"
-                                >
-                                  <div className="flex w-full items-start gap-2.5 sm:w-auto sm:items-center">
-                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
-                                      {(d.name || "D")[0]}
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
-                                      <p className="text-[10px] text-neutral-500">
-                                        {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ""}
-                                      </p>
-                                      {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
-                                    </div>
+                              <a
+                                key={j}
+                                href={mapsUrl || '#'}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`Open ${d.name || 'doctor location'} in Google Maps`}
+                                onClick={event => {
+                                  if (!mapsUrl) event.preventDefault();
+                                }}
+                                className="glass-liquid flex flex-col gap-2 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40 sm:flex-row sm:items-center sm:gap-2.5"
+                              >
+                                <div className="flex w-full items-start gap-2.5 sm:w-auto sm:items-center">
+                                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
+                                    {(d.name || 'D')[0]}
                                   </div>
-                                  <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
-                                    <div className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
-                                      {d.phone && <><PhoneIcon />{d.phone}</>}
-                                    </div>
-                                    <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
-                                      <span>Map</span>
-                                      <ArrowUpRightIcon />
-                                    </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
+                                    <p className="text-[10px] text-neutral-500">
+                                      {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ''}
+                                    </p>
+                                    {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
                                   </div>
-                                </a>
-                              );
-                            })}
-                          </div>
-                        )}
+                                </div>
+                                <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
+                                  <div className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
+                                    {d.phone && <><PhoneIcon />{d.phone}</>}
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
+                                    <span>Map</span>
+                                    <ArrowUpRightIcon />
+                                  </div>
+                                </div>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      )}
                       </div>
+                    )}
+                    </div>
                     </div>
 
                     {/* User avatar */}
@@ -1504,48 +1474,40 @@ export default function Chat() {
             <div ref={bottomRef} />
           </div>
         </div>
-      </div>
 
-      {/* ── Input Bar ───────────────────────────────────────── */}
-      <ChatInput
-        models={MODELS}
-        hasMessages={hasMessages}
-        placeholder={tab === "asha" ? ashaPlaceholder : "Describe symptoms in any language..."}
-        onSend={handleSend}
-        onTranscribe={transcribeAudio}
-        disabled={loading || ashaInputDisabled}
-      />
-
-        {/* ── Input Bar ───────────────────────────────────────── */}
+      <div className="border-t border-white/35 bg-white/30 backdrop-blur-xl">
+        {/* Input Bar */}
         <ChatInput
           models={MODELS}
           hasMessages={hasMessages}
-          placeholder={tab === "asha" ? "Patient observations... (any language)" : "Describe symptoms in any language..."}
+          placeholder={tab === "asha" ? ashaPlaceholder : "Describe symptoms in any language..."}
           onSend={handleSend}
           onTranscribe={transcribeAudio}
+          disabled={loading || ashaInputDisabled}
         />
 
-        {/* ── Footer info ─────────────────────────────────────── */}
-        <div className="glass-liquid flex items-center justify-between border-t border-white/35 px-3 py-2 sm:px-4 sm:py-1.5">
-          <div className="mx-auto flex w-full max-w-4xl flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        {/* Footer info */}
+        <div className="px-3 py-2 sm:px-4 sm:py-2">
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-1 border-t border-white/45 pt-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-1.5">
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              <span className="text-[10px] text-neutral-400">6 agents online</span>
+              <span className="text-[10px] text-neutral-500">{agentCount} agents online</span>
             </div>
-            <p className="text-[10px] text-neutral-400 sm:text-right">
-              Always consult a doctor before acting on this information · Emergency: 112
+            <p className="text-[10px] text-neutral-500 sm:text-right">
+              Always consult a doctor before acting on this information - Emergency: 112
             </p>
           </div>
         </div>
         {locationHint && (
           <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-            <div className="mx-auto max-w-4xl">
+            <div className="mx-auto max-w-5xl">
               {locationHint}
             </div>
           </div>
         )}
-
-      </div>
+    </div>
+    </div>
     </div>
   );
 }
+

@@ -240,14 +240,8 @@ export const ChatInput = ({
   };
 
   return (
-    <motion.div
-      layout
-      transition={{ type: "spring", stiffness: 200, damping: 25 }}
-      className={`z-20 flex w-full justify-center px-3 py-3 sm:px-4 sm:py-4 ${!hasMessages ? "flex-1 items-center" : "items-end"
-        }`}>
-      <motion.div
-        layout
-        className="glass-liquid-strong w-full max-w-5xl rounded-2xl border border-white/50 p-3 shadow-lg sm:rounded-[24px]">
+    <div className="z-20 mx-auto w-full max-w-5xl px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-3">
+      <div className="glass-liquid-strong w-full rounded-[26px] border border-white/50 p-3 shadow-[0_24px_60px_rgba(15,23,42,0.12)] sm:rounded-[30px] sm:p-4">
         {/* Hidden file inputs */}
         <input
           ref={imageInputRef}
@@ -312,8 +306,8 @@ export const ChatInput = ({
         )}
 
         <div
-          className="glass-liquid mt-2 flex items-center justify-between gap-2 rounded-xl border border-white/40 p-2">
-          <div className="no-scrollbar flex items-center gap-1 overflow-x-auto sm:gap-2">
+          className="glass-liquid mt-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/40 p-2">
+          <div className="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto sm:gap-2">
             <AttachmentMenu
               onImageClick={() => imageInputRef.current?.click()}
               onDocClick={() => docInputRef.current?.click()}
@@ -339,17 +333,17 @@ export const ChatInput = ({
 
           <button
             onClick={handleSend}
-            disabled={disabled || !inputValue.trim()}
+            disabled={disabled || (!inputValue.trim() && attachments.length === 0)}
             className={`shrink-0 rounded-lg p-2 transition-colors sm:p-3 ${
-              !disabled && inputValue.trim()
+              !disabled && (inputValue.trim() || attachments.length > 0)
                 ? "glass-liquid-accent text-neutral-950"
                 : "cursor-not-allowed border border-white/30 bg-white/30 text-neutral-400 dark:bg-white/5 dark:text-neutral-500"
               }`}>
             <Send className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };
 
