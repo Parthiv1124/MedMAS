@@ -1,18 +1,27 @@
 # backend/services/asha_service.py
 """Supabase operations for ASHA worker patient queue management."""
-from config import supabase
+from config import supabase_db
+
+ALLOWED_GENDERS = {"male", "female", "other"}
 
 
 def _check_supabase():
-    if not supabase:
+    if not supabase_db:
         raise RuntimeError("Supabase not configured — set SUPABASE_URL and SUPABASE_ANON_KEY in .env")
+
+
+def _normalize_gender(gender: str) -> str:
+    normalized = (gender or "").strip().lower()
+    if normalized not in ALLOWED_GENDERS:
+        raise ValueError("Gender must be one of: male, female, other.")
+    return normalized
 
 
 def get_patient_queue(asha_worker_id: str) -> list:
     """Fetch active patients assigned to an ASHA worker, ordered by priority."""
     _check_supabase()
     result = (
-        supabase.table("asha_patients")
+        supabase_db.table("asha_patients")
         .select("*")
         .eq("asha_worker_id", asha_worker_id)
         .eq("status", "active")
@@ -27,11 +36,12 @@ def add_patient(asha_worker_id: str, name: str, age: int, gender: str,
                 notes: str = "") -> dict:
     """Add a new patient to the ASHA worker's queue."""
     _check_supabase()
-    result = supabase.table("asha_patients").insert({
+    normalized_gender = _normalize_gender(gender)
+    result = supabase_db.table("asha_patients").insert({
         "asha_worker_id": asha_worker_id,
         "name":           name,
         "age":            age,
-        "gender":         gender,
+        "gender":         normalized_gender,
         "village":        village,
         "district":       district,
         "priority":       priority,
@@ -44,11 +54,11 @@ def add_patient(asha_worker_id: str, name: str, age: int, gender: str,
 def save_field_assessment(patient_id: str, asha_worker_id: str,
                            asha_result: dict) -> bool:
     """Save completed field assessment to Supabase."""
-    if not supabase:
+    if not supabase_db:
         print("[ASHA Service] Supabase not configured — skipping save")
         return False
     try:
-        supabase.table("asha_assessments").insert({
+        supabase_db.table("asha_assessments").insert({
             "patient_id":       patient_id,
             "asha_worker_id":   asha_worker_id,
             "triage_decision":  asha_result.get("triage_decision"),
@@ -64,9 +74,9 @@ def save_field_assessment(patient_id: str, asha_worker_id: str,
 
 def update_patient_status(patient_id: str, status: str):
     """Update patient status: active | referred | resolved."""
-    if not supabase:
+    if not supabase_db:
         return
-    supabase.table("asha_patients").update(
+    supabase_db.table("asha_patients").update(
         {"status": status}
     ).eq("id", patient_id).execute()
 
@@ -75,7 +85,7 @@ def get_assessment_history(patient_id: str) -> list:
     """Get all assessments for a patient."""
     _check_supabase()
     result = (
-        supabase.table("asha_assessments")
+        supabase_db.table("asha_assessments")
         .select("*")
         .eq("patient_id", patient_id)
         .order("created_at", desc=True)

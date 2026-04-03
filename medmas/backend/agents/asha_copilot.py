@@ -13,7 +13,6 @@ import json
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from config import llm
-from services.doctor_finder import find_doctors
 from state import MedMASState
 
 SYSTEM_PROMPT = """You are a decision support assistant for ASHA (Accredited Social Health Activist) workers in rural India.
@@ -95,16 +94,15 @@ def asha_copilot_node(state: MedMASState) -> dict:
     except Exception as e:
         return {"error": f"ASHACopilot failed: {e}"}
 
-    # Find nearest facility/doctor based on triage decision
-    doctors = find_doctors(
-        specialty=result.get("refer_specialty", "General"),
-        district=state.get("user_district") or ""
-    )
-
-    triage = "urgent" if result.get("triage_decision") == "refer_urgent" else "moderate"
+    decision = result.get("triage_decision")
+    if decision == "refer_urgent":
+        triage = "urgent"
+    elif decision == "monitor_at_home":
+        triage = "routine"
+    else:
+        triage = "moderate"
 
     return {
         "asha_result":  result,
-        "doctor_list":  doctors,
         "triage_level": triage,
     }

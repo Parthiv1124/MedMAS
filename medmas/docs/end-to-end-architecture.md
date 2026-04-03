@@ -9,6 +9,7 @@ It is focused on:
 - current end-to-end product flow
 - actual frontend and backend responsibilities
 - newly added speech-to-text chat flow
+- newly implemented Symptom Checker pipeline
 - LangGraph orchestration behavior
 - location and provider discovery
 - data and retrieval boundaries
@@ -33,6 +34,8 @@ MedMAS currently consists of:
 The most important architectural reality today is:
 
 `the system is orchestrated, but most requests still run through one primary specialist path rather than a truly collaborative multi-agent workflow`
+
+One notable exception is that the Symptom Checker is no longer a single-shot prompt. It now has an internal multi-step pipeline while still appearing as one specialist node in the top-level graph.
 
 ## High-Level System Architecture
 
@@ -392,7 +395,7 @@ That is a good prototype architecture, but not yet a mature multi-agent platform
 
 Current specialist roles:
 
-- Symptom Checker: triage, likely diagnoses, specialty recommendation
+- Symptom Checker: structured symptom extraction, red-flag checks, differential reasoning, triage, specialty recommendation
 - Disease Predictor: lab parsing, disease risk, urgency
 - Empathy Chatbot: emotional support and escalation
 - Health Scorer: preventive score plus actions
@@ -408,6 +411,68 @@ The role definitions are good. The main opportunity is not to add more agent typ
 - shared memory
 - confidence handling
 
+## Symptom Checker Architecture
+
+The active Symptom Checker implementation is now in:
+
+- `backend/agents/symptom_checker_v2.py`
+
+It is still routed as one top-level specialist node, but internally it is now a pipeline:
+
+```mermaid
+flowchart TD
+    A[translated_input] --> B[symptom structuring]
+    B --> C[deterministic red-flag detection]
+    B --> D[targeted retrieval query]
+    D --> E[Qdrant medical retrieval]
+    B --> F[differential reasoning]
+    E --> F
+    C --> G[triage synthesis]
+    F --> G
+    G --> H[specialty selection]
+    H --> I[doctor lookup]
+    G --> J[symptom_result]
+```
+
+### Current internal stages
+
+The new Symptom Checker now performs:
+
+1. symptom structuring
+2. deterministic red-flag checks
+3. retrieval query construction
+4. Qdrant-backed medical context retrieval
+5. differential diagnosis reasoning
+6. triage synthesis
+7. specialty and doctor lookup
+
+### New symptom output shape
+
+The returned `symptom_result` now contains richer fields such as:
+
+- `structured_symptoms`
+- `red_flag_analysis`
+- `follow_up_questions`
+- `confidence_summary`
+- `diagnosis_confidence`
+- `triage_reason`
+- `diagnoses`
+- `triage_level`
+- `recommended_specialty`
+- `red_flags`
+- `next_steps`
+
+### Product impact
+
+This is one of the first places where MedMAS has moved beyond a pure single-prompt specialist pattern.
+
+It improves:
+
+- safety through deterministic red-flag logic
+- explainability through structured symptom extraction
+- retrieval quality through better retrieval queries
+- UI usefulness through symptom insights and follow-up questions
+
 ## Data and Retrieval Architecture
 
 Current main data sources:
@@ -418,7 +483,7 @@ Current main data sources:
 
 Current retrieval/provider behavior:
 
-- symptom flows can use the local medical knowledge base
+- symptom flows use structured retrieval queries against the local medical knowledge base
 - speech transcription uses DeepInfra's OpenAI-compatible audio API
 - doctor discovery prefers live OSM lookup when `user_lat/user_lng` is present
 - doctor discovery falls back to `data/doctors.csv` by district and specialty
@@ -508,11 +573,26 @@ As of the current implementation, the main user-visible capabilities are:
 - multilingual text chat
 - speech-to-text-assisted chat input
 - live-location-assisted district detection
+- richer Symptom Checker insights in chat responses
 - doctor lookup with OSM-first fallback
 - lab PDF upload analysis
 - ASHA field assessment workflow
 - OTP-backed signup and Supabase login
 - reminders and history APIs
+
+## Testing Status
+
+New backend tests now exist for the Symptom Checker pipeline:
+
+- `backend/tests/test_symptom_checker_v2.py`
+
+Current covered behaviors:
+
+- urgent red-flag detection for chest-pain patterns
+- triage synthesis behavior for severe symptom cases
+- end-to-end node contract with mocked structuring, retrieval, reasoning, and doctor lookup
+
+This is still unit-test-level coverage, but it is an improvement over the earlier no-test state of the Symptom Checker.
 
 ## Main Architectural Gaps
 
@@ -523,7 +603,8 @@ As of the current implementation, the main user-visible capabilities are:
 5. frontend chat page is too large
 6. memory and state are still request-scoped in practice
 7. speech-to-text is integrated, but still lacks retries, fallbacks, and transcript confidence handling
-8. platform engineering discipline is thin
+8. the new Symptom Checker pipeline still needs deeper integration tests and follow-up-question workflows
+9. platform engineering discipline is thin
 
 ## Recommended Improvement Roadmap
 
@@ -542,6 +623,7 @@ As of the current implementation, the main user-visible capabilities are:
 3. formalize retrieval metadata and migrations
 4. move persistence behind service or repository boundaries
 5. add STT-specific error handling and browser compatibility fallbacks
+6. add integration tests for the Symptom Checker chat path
 
 ### Phase 3: Real multi-agent evolution
 

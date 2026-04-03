@@ -103,6 +103,7 @@ export const ChatInput = ({
   placeholder,
   onSend,
   onTranscribe,
+  disabled = false,
 }) => {
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -225,6 +226,9 @@ export const ChatInput = ({
   };
 
   const handleMicClick = () => {
+    if (disabled) {
+      return;
+    }
     if (isTranscribing) {
       return;
     }
@@ -266,6 +270,7 @@ export const ChatInput = ({
           ref={textAreaRef}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
+          disabled={disabled}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -273,7 +278,9 @@ export const ChatInput = ({
             }
           }}
           placeholder={placeholder}
-          className="mb-2 max-h-[160px] min-h-[40px] w-full resize-none bg-transparent px-1 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-500 sm:max-h-[200px] sm:min-h-[44px] sm:px-2 sm:text-base"
+          className={`mb-2 max-h-[160px] min-h-[40px] w-full resize-none bg-transparent px-1 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-500 sm:max-h-[200px] sm:min-h-[44px] sm:px-2 sm:text-base ${
+            disabled ? "cursor-not-allowed opacity-60" : ""
+          }`}
           rows={1} />
 
         {/* Attachment previews */}
@@ -314,11 +321,12 @@ export const ChatInput = ({
             <button
               type="button"
               onClick={handleMicClick}
-              disabled={!onTranscribe || isTranscribing}
-              className={`shrink-0 rounded-lg border p-2 transition-colors sm:p-2.5 ${isRecording
+              disabled={disabled || !onTranscribe || isTranscribing}
+              className={`shrink-0 rounded-lg border p-2 transition-colors sm:p-2.5 ${
+                isRecording
                   ? "border-red-300 bg-red-50 text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"
                   : "border-neutral-200 bg-neutral-100 text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400"
-                } ${(!onTranscribe || isTranscribing) ? "cursor-not-allowed opacity-60" : ""}`}
+              } ${(disabled || !onTranscribe || isTranscribing) ? "cursor-not-allowed opacity-60" : ""}`}
               title={isRecording ? "Stop recording" : "Record voice message"}>
               {isRecording ? <Square className="h-4 w-4 sm:h-5 sm:w-5" /> : <Mic className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
@@ -331,8 +339,9 @@ export const ChatInput = ({
 
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim() && attachments.length === 0}
-            className={`rounded-lg p-2 transition-colors sm:p-3 ${inputValue.trim() || attachments.length > 0
+            disabled={disabled || !inputValue.trim()}
+            className={`shrink-0 rounded-lg p-2 transition-colors sm:p-3 ${
+              !disabled && inputValue.trim()
                 ? "glass-liquid-accent text-neutral-950"
                 : "cursor-not-allowed border border-white/30 bg-white/30 text-neutral-400 dark:bg-white/5 dark:text-neutral-500"
               }`}>

@@ -187,6 +187,10 @@ function getLocationBadgeClasses(status) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
+function normalizePatientId(value) {
+  return value == null ? "" : String(value);
+}
+
 export default function Chat() {
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
@@ -195,6 +199,25 @@ export default function Chat() {
   const [district, setDistrict] = useState("");
   const [districts, setDistricts] = useState(["Vadodara", "Surat", "Rajkot", "Bharuch", "Ahmedabad", "Mumbai", "Delhi"]);
   const [locationStatus, setLocationStatus] = useState("detecting");
+  const [locationHint, setLocationHint]   = useState("");
+  const [userCoords, setUserCoords]       = useState(null); // {lat, lng}
+  const [tab, setTab]                     = useState("chat");
+  const [ashaPatients, setAshaPatients]   = useState([]);
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [ashaQueueLoading, setAshaQueueLoading] = useState(false);
+  const [ashaQueueError, setAshaQueueError] = useState("");
+  const [creatingPatient, setCreatingPatient] = useState(false);
+  const [showPatientForm, setShowPatientForm] = useState(false);
+  const [patientForm, setPatientForm] = useState({
+    name: "",
+    age: "",
+    gender: "female",
+    village: "",
+    district: "",
+    priority: "1",
+    notes: "",
+  });
+  const bottomRef                         = useRef(null);
   const [locationHint, setLocationHint] = useState("");
   const [userCoords, setUserCoords] = useState(null); // {lat, lng}
   const [tab, setTab] = useState("chat");
@@ -249,6 +272,7 @@ export default function Chat() {
 
   const storedUser = localStorage.getItem("medmas_user");
   const user = storedUser ? JSON.parse(storedUser) : null;
+  const ashaWorkerId = user?.id || "";
 
   function handleLogout() {
     localStorage.removeItem("medmas_token");
@@ -259,6 +283,10 @@ export default function Chat() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    setPatientForm(prev => ({ ...prev, district: district || user?.district || "Vadodara" }));
+  }, [district, user?.district]);
 
   // Fetch available districts from backend
   useEffect(() => {
@@ -324,6 +352,126 @@ export default function Chat() {
     );
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (tab !== "asha" || !ashaWorkerId) return;
+    loadAshaQueue();
+  }, [tab, ashaWorkerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function queueAssistantError(message) {
+    setMessages(prev => [...prev, {
+      id: Date.now() + 1,
+      role: "assistant",
+      text: `Error: ${message}`,
+      intent: "asha",
+    }]);
+  }
+
+  function handlePatientFormChange(field, value) {
+    setPatientForm(prev => ({ ...prev, [field]: value }));
+  }
+
+  async function loadAshaQueue() {
+    if (!ashaWorkerId) {
+      setAshaQueueError("Sign in as an ASHA worker to access the patient queue.");
+      return;
+    }
+
+    setAshaQueueLoading(true);
+    setAshaQueueError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/asha/queue/${encodeURIComponent(ashaWorkerId)}`);
+      const data = await res.json();
+      if (!res.ok || data.detail) {
+        throw new Error(data.detail || "Unable to load ASHA queue.");
+      }
+
+      const patients = data.patients || [];
+      setAshaPatients(patients);
+
+      const currentSelectionExists = patients.some(
+        patient => normalizePatientId(patient.id) === normalizePatientId(selectedPatientId)
+      );
+
+      if (patients.length === 0) {
+        setSelectedPatientId("");
+      } else if (!currentSelectionExists) {
+        setSelectedPatientId(normalizePatientId(patients[0].id));
+      }
+    } catch (err) {
+      setAshaQueueError(err.message || "Unable to load ASHA queue.");
+    } finally {
+      setAshaQueueLoading(false);
+    }
+  }
+
+  async function createPatient() {
+    if (!ashaWorkerId) {
+      setAshaQueueError("Sign in as an ASHA worker to create a patient.");
+      return;
+    }
+
+    const name = patientForm.name.trim();
+    const village = patientForm.village.trim();
+    const notes = patientForm.notes.trim();
+    const age = Number(patientForm.age);
+    const priority = Number(patientForm.priority);
+    const patientDistrict = (patientForm.district || district || user?.district || "").trim();
+
+    if (!name || !village || !patientDistrict || !Number.isFinite(age) || age <= 0) {
+      setAshaQueueError("Enter patient name, age, village, and district before creating the record.");
+      return;
+    }
+
+    setCreatingPatient(true);
+    setAshaQueueError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/asha/patient`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          asha_worker_id: ashaWorkerId,
+          asha_worker_phone: user?.phone || "",
+          asha_worker_district: user?.district || district || "",
+          name,
+          age,
+          gender: patientForm.gender,
+          village,
+          district: patientDistrict,
+          priority: Number.isFinite(priority) && priority > 0 ? priority : 1,
+          notes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.detail) {
+        throw new Error(data.detail || "Unable to create patient.");
+      }
+
+      const patient = data.patient;
+      if (patient) {
+        setAshaPatients(prev => [patient, ...prev]);
+        setSelectedPatientId(normalizePatientId(patient.id));
+      }
+      setPatientForm({
+        name: "",
+        age: "",
+        gender: "female",
+        village: "",
+        district: patientDistrict,
+        priority: "1",
+        notes: "",
+      });
+      setShowPatientForm(false);
+    } catch (err) {
+      setAshaQueueError(err.message || "Unable to create patient.");
+    } finally {
+      setCreatingPatient(false);
+    }
+  }
+
+  async function sendMessage(text) {
+    setMessages(prev => [...prev, { id: Date.now(), role: "user", text }]);
   function buildChatHistory(currentMessages, limit = 20) {
     // Send the last `limit` messages as context — backend agents further slice internally
     return currentMessages
@@ -423,6 +571,17 @@ export default function Chat() {
   }
 
   async function sendASHA(text) {
+    if (!ashaWorkerId) {
+      queueAssistantError("Sign in as an ASHA worker before using ASHA Copilot.");
+      return;
+    }
+
+    if (!selectedPatientId) {
+      queueAssistantError("Select or create a patient before sending an ASHA assessment.");
+      return;
+    }
+
+    setMessages(prev => [...prev, { id: Date.now(), role: "user", text: `[ASHA] ${text}` }]);
     const userMsg = { id: Date.now(), role: "user", text: `[ASHA] ${text}` };
 
     // Ensure session exists
@@ -461,7 +620,8 @@ export default function Chat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          asha_worker_id: "demo-worker", patient_id: "demo-patient",
+          asha_worker_id: ashaWorkerId,
+          patient_id: selectedPatientId,
           observations: text, user_district: district, user_lat: userCoords?.lat, user_lng: userCoords?.lng,
           chat_history: chatHistory,
         }),
@@ -507,6 +667,15 @@ export default function Chat() {
 
   const agentInfo = activeAgent && Object.values(AGENT_INFO).find(a => activeAgent.includes(a.label));
   const hasMessages = messages.length > 0;
+  const selectedPatient = ashaPatients.find(
+    patient => normalizePatientId(patient.id) === normalizePatientId(selectedPatientId)
+  );
+  const ashaInputDisabled = tab === "asha" && (!ashaWorkerId || !selectedPatientId);
+  const ashaPlaceholder = !ashaWorkerId
+    ? "Sign in to use ASHA Copilot..."
+    : !selectedPatientId
+      ? "Select or create a patient before sending observations..."
+      : "Patient observations... (any language)";
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -615,6 +784,246 @@ export default function Chat() {
               <LocationIcon />
               <span>{locationStatus === "live" ? "Live" : locationStatus === "detecting" ? "Detecting" : "Manual"}</span>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Messages ────────────────────────────────────────── */}
+      <div className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-3 sm:pt-4">
+        <div className="flex w-full max-w-4xl flex-col gap-4 px-3 pb-24 sm:px-4 sm:pb-28">
+
+          {tab === "asha" && (
+            <div className="glass-liquid space-y-4 rounded-3xl border border-white/45 p-4 shadow-[0_20px_60px_rgba(245,158,11,0.12)]">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-600">
+                    ASHA Workspace
+                  </p>
+                  <h3 className="mt-1 text-base font-semibold text-neutral-900">
+                    Patient Queue and Field Assessment
+                  </h3>
+                  <p className="mt-1 text-sm text-neutral-500">
+                    Link each ASHA assessment to a real patient record before sending observations to the orchestrator.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-medium text-amber-700">
+                    Worker: {user?.name || user?.email || "Not signed in"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={loadAshaQueue}
+                    disabled={ashaQueueLoading || !ashaWorkerId}
+                    className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-[11px] font-semibold text-neutral-700 transition hover:border-amber-300 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {ashaQueueLoading ? "Refreshing..." : "Refresh Queue"}
+                  </button>
+                </div>
+              </div>
+
+              {!ashaWorkerId && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  Sign in with a real worker account to use ASHA Copilot.
+                </div>
+              )}
+
+              {ashaQueueError && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {ashaQueueError}
+                </div>
+              )}
+
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                <div className="space-y-3 rounded-2xl border border-white/50 bg-white/55 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-neutral-900">Assigned Patients</p>
+                      <p className="text-[11px] text-neutral-500">Active queue from Supabase</p>
+                    </div>
+                    <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-[10px] font-semibold text-white">
+                      {ashaPatients.length}
+                    </span>
+                  </div>
+
+                  {ashaQueueLoading ? (
+                    <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-5 text-sm text-neutral-500">
+                      Loading patient queue...
+                    </div>
+                  ) : ashaPatients.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50/70 px-4 py-5 text-sm text-amber-700">
+                      No active patients in this queue yet. Add the first patient below.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {ashaPatients.slice(0, 6).map(patient => {
+                        const patientId = normalizePatientId(patient.id);
+                        const isSelected = patientId === normalizePatientId(selectedPatientId);
+                        return (
+                          <button
+                            key={patientId}
+                            type="button"
+                            onClick={() => setSelectedPatientId(patientId)}
+                            className={`flex w-full items-start justify-between rounded-2xl border px-3 py-3 text-left transition ${
+                              isSelected
+                                ? "border-amber-300 bg-gradient-to-r from-amber-500/12 to-yellow-400/12 shadow-[0_10px_30px_rgba(245,158,11,0.12)]"
+                                : "border-white/50 bg-white/70 hover:border-amber-200 hover:bg-amber-50/60"
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-neutral-900">{patient.name}</p>
+                              <p className="mt-1 text-[11px] text-neutral-500">
+                                {patient.age} yrs · {patient.gender} · {patient.village || patient.district}
+                              </p>
+                              {patient.notes && (
+                                <p className="mt-1 line-clamp-2 text-[11px] text-neutral-500">{patient.notes}</p>
+                              )}
+                            </div>
+                            <div className="ml-3 shrink-0 text-right">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                                Priority
+                              </p>
+                              <p className="text-sm font-bold text-amber-700">{patient.priority || 1}</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-2xl border border-white/50 bg-white/55 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-neutral-900">Selected Patient</p>
+                      <p className="text-[11px] text-neutral-500">This patient will receive the next assessment</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPatientForm(prev => !prev)}
+                      className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-100"
+                    >
+                      {showPatientForm ? "Close Form" : "Add Patient"}
+                    </button>
+                  </div>
+
+                  {selectedPatient ? (
+                    <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-50 px-4 py-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-semibold text-neutral-900">{selectedPatient.name}</p>
+                          <p className="mt-1 text-sm text-neutral-600">
+                            {selectedPatient.age} years · {selectedPatient.gender}
+                          </p>
+                          <p className="mt-2 text-[11px] text-neutral-500">
+                            {selectedPatient.village}, {selectedPatient.district}
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-amber-200 bg-white/80 px-2.5 py-1 text-[10px] font-semibold text-amber-700">
+                          #{normalizePatientId(selectedPatient.id)}
+                        </span>
+                      </div>
+                      {selectedPatient.notes && (
+                        <p className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-[11px] text-neutral-600">
+                          {selectedPatient.notes}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-5 text-sm text-neutral-500">
+                      Select a patient from the queue or add a new patient to start an ASHA assessment.
+                    </div>
+                  )}
+
+                  {showPatientForm && (
+                    <div className="grid gap-3 rounded-2xl border border-neutral-200 bg-white/80 p-4 sm:grid-cols-2">
+                      <input
+                        value={patientForm.name}
+                        onChange={e => handlePatientFormChange("name", e.target.value)}
+                        placeholder="Patient name"
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-amber-300"
+                      />
+                      <input
+                        value={patientForm.age}
+                        onChange={e => handlePatientFormChange("age", e.target.value.replace(/[^\d]/g, "").slice(0, 3))}
+                        placeholder="Age"
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-amber-300"
+                      />
+                      <select
+                        value={patientForm.gender}
+                        onChange={e => handlePatientFormChange("gender", e.target.value)}
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-amber-300"
+                      >
+                        {[
+                          { value: "female", label: "Female" },
+                          { value: "male", label: "Male" },
+                          { value: "other", label: "Other" },
+                        ].map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        value={patientForm.village}
+                        onChange={e => handlePatientFormChange("village", e.target.value)}
+                        placeholder="Village"
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-amber-300"
+                      />
+                      <select
+                        value={patientForm.district}
+                        onChange={e => handlePatientFormChange("district", e.target.value)}
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-amber-300"
+                      >
+                        {districts.map(option => <option key={option}>{option}</option>)}
+                      </select>
+                      <select
+                        value={patientForm.priority}
+                        onChange={e => handlePatientFormChange("priority", e.target.value)}
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-amber-300"
+                      >
+                        {[1, 2, 3].map(option => <option key={option} value={option}>Priority {option}</option>)}
+                      </select>
+                      <textarea
+                        value={patientForm.notes}
+                        onChange={e => handlePatientFormChange("notes", e.target.value)}
+                        placeholder="Notes for the queue"
+                        rows={3}
+                        className="sm:col-span-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none transition focus:border-amber-300"
+                      />
+                      <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowPatientForm(false)}
+                          className="rounded-xl border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-600 transition hover:bg-neutral-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={createPatient}
+                          disabled={creatingPatient}
+                          className="rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {creatingPatient ? "Creating..." : "Create Patient"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          <AnimatePresence>
+            {!hasMessages && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="flex flex-col items-center justify-center py-12 sm:py-16">
+                <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500/10 to-teal-500/10">
+                  <span className="text-3xl">{tab === "asha" ? "\uD83D\uDC69\u200D\u2695\uFE0F" : "\uD83E\uDE7A"}</span>
             <select
               value={district}
               onChange={e => setDistrict(e.target.value)}
@@ -655,6 +1064,23 @@ export default function Chat() {
                     <div key={d} className="h-2 w-2 rounded-full bg-brand-400" style={{ animation: "typing 1.4s infinite", animationDelay: `${d}ms` }} />
                   ))}
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Message bubbles */}
+          <AnimatePresence initial={false}>
+            {messages.map(msg => {
+              const isUser = msg.role === "user";
+              const agent = msg.intent && AGENT_INFO[msg.intent];
+              const triage = msg.triage && TRIAGE[msg.triage];
+              const visibleText = getVisibleMessageText(msg.text, msg.doctors);
+              const symptom = msg.symptomResult;
+              const structuredSymptoms = symptom?.structured_symptoms;
+              const asha = msg.asha;
+              const documentation = asha?.documentation;
+
+              return (
               </div>
             </motion.div>
           )}
@@ -818,6 +1244,145 @@ export default function Chat() {
                               )}
                             </div>
 
+                      {asha && (
+                        <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                            ASHA Guidance
+                          </p>
+
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {asha?.triage_decision && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Decision:</span>{" "}
+                                <span className="text-neutral-600">{formatLabel(asha.triage_decision)}</span>
+                              </div>
+                            )}
+                            {asha?.refer_to && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Refer To:</span>{" "}
+                                <span className="text-neutral-600">{asha.refer_to}</span>
+                              </div>
+                            )}
+                            {asha?.refer_specialty && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Specialty:</span>{" "}
+                                <span className="text-neutral-600">{asha.refer_specialty}</span>
+                              </div>
+                            )}
+                            {asha?.urgency_hours && (
+                              <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                <span className="font-semibold text-neutral-700">Urgency:</span>{" "}
+                                <span className="text-neutral-600">Within {asha.urgency_hours} hours</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {asha?.danger_signs?.length > 0 && (
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                                Danger Signs
+                              </p>
+                              <div className="space-y-1">
+                                {asha.danger_signs.slice(0, 4).map(sign => (
+                                  <div key={sign} className="rounded-lg bg-red-50 px-3 py-2 text-[11px] text-red-700">
+                                    {sign}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {asha?.home_care_steps?.length > 0 && (
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                                Home Care Steps
+                              </p>
+                              <div className="space-y-1">
+                                {asha.home_care_steps.slice(0, 3).map(step => (
+                                  <div key={step} className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+                                    {step}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {documentation && (
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                                Documentation
+                              </p>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                {documentation?.chief_complaint && (
+                                  <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                    <span className="font-semibold text-neutral-700">Complaint:</span>{" "}
+                                    <span className="text-neutral-600">{documentation.chief_complaint}</span>
+                                  </div>
+                                )}
+                                {documentation?.duration && (
+                                  <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                    <span className="font-semibold text-neutral-700">Duration:</span>{" "}
+                                    <span className="text-neutral-600">{documentation.duration}</span>
+                                  </div>
+                                )}
+                                {documentation?.key_vitals_noted && (
+                                  <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                    <span className="font-semibold text-neutral-700">Vitals:</span>{" "}
+                                    <span className="text-neutral-600">{documentation.key_vitals_noted}</span>
+                                  </div>
+                                )}
+                                {documentation?.action_taken && (
+                                  <div className="rounded-lg bg-white/50 px-3 py-2 text-[11px]">
+                                    <span className="font-semibold text-neutral-700">Action:</span>{" "}
+                                    <span className="text-neutral-600">{documentation.action_taken}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {asha?.asha_script && (
+                            <div>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                                Suggested Script
+                              </p>
+                              <div className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                                {asha.asha_script}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Doctor cards */}
+                      {msg.doctors?.length > 0 && (
+                        <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3 dark:border-neutral-700/40">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Nearby Doctors</p>
+                          {msg.doctors.slice(0, 3).map((d, j) => {
+                            const mapsUrl = getDoctorMapsUrl(d, district);
+
+                            return (
+                            <a
+                              key={j}
+                              href={mapsUrl || "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`Open ${d.name || "doctor location"} in Google Maps`}
+                              onClick={event => {
+                                if (!mapsUrl) event.preventDefault();
+                              }}
+                              className="glass-liquid flex flex-col gap-2 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40 sm:flex-row sm:items-center sm:gap-2.5"
+                            >
+                              <div className="flex w-full items-start gap-2.5 sm:w-auto sm:items-center">
+                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
+                                  {(d.name || "D")[0]}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
+                                  <p className="text-[10px] text-neutral-500">
+                                    {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ""}
+                                  </p>
+                                  {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
                             {structuredSymptoms?.risk_factors?.length > 0 && (
                               <div>
                                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -939,6 +1504,17 @@ export default function Chat() {
             <div ref={bottomRef} />
           </div>
         </div>
+      </div>
+
+      {/* ── Input Bar ───────────────────────────────────────── */}
+      <ChatInput
+        models={MODELS}
+        hasMessages={hasMessages}
+        placeholder={tab === "asha" ? ashaPlaceholder : "Describe symptoms in any language..."}
+        onSend={handleSend}
+        onTranscribe={transcribeAudio}
+        disabled={loading || ashaInputDisabled}
+      />
 
         {/* ── Input Bar ───────────────────────────────────────── */}
         <ChatInput

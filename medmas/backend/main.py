@@ -20,6 +20,7 @@ from services.asha_service import (
 )
 from config import (
     supabase,
+    supabase_db,
     GOOGLE_MAPS_API_KEY,
     DOCTORS_CSV_PATH,
     SPEECH_TO_TEXT_MODEL,
@@ -32,6 +33,33 @@ import pandas as pd
 
 # In-memory OTP store: {phone: {"otp": "123456", "expires_at": timestamp}}
 _otp_store: dict = {}
+
+
+def _sync_public_user(
+    user_id: str,
+    phone: str = "",
+    district: str = "",
+    lang_code: str = "en",
+    state: str = "",
+):
+    """Ensure the public users table contains the current auth user."""
+    if not supabase_db or not user_id:
+        return
+
+    normalized_phone = (phone or "").strip()
+    if not normalized_phone:
+        raise ValueError("User phone is required to sync with the public users table.")
+
+    supabase_db.table("users").upsert(
+        {
+            "id": user_id,
+            "phone": normalized_phone,
+            "district": district,
+            "lang_code": lang_code or "en",
+            "state": state or None,
+        },
+        on_conflict="id",
+    ).execute()
 
 app = FastAPI(
     title="MedMAS API",
@@ -451,6 +479,11 @@ async def signup(req: SignupRequest):
         })
         if auth_res.user is None:
             raise HTTPException(400, "Signup failed — check email and password")
+        _sync_public_user(
+            user_id=auth_res.user.id,
+            phone=req.phone,
+            district=req.district,
+        )
         return {
             "access_token": auth_res.session.access_token if auth_res.session else "",
             "user": {
@@ -479,6 +512,13 @@ async def login(req: LoginRequest):
         if auth_res.user is None:
             raise HTTPException(401, "Invalid email or password")
         user_meta = auth_res.user.user_metadata or {}
+        _sync_public_user(
+            user_id=auth_res.user.id,
+            phone=user_meta.get("phone", ""),
+            district=user_meta.get("district", ""),
+            lang_code=user_meta.get("lang_code", "en"),
+            state=user_meta.get("state", ""),
+        )
         return {
             "access_token": auth_res.session.access_token,
             "user": {
@@ -561,6 +601,8 @@ class ASHAAssessRequest(BaseModel):
 
 class AddPatientRequest(BaseModel):
     asha_worker_id: str
+    asha_worker_phone: Optional[str] = None
+    asha_worker_district: Optional[str] = None
     name:           str
     age:            int
     gender:         str
@@ -582,6 +624,11 @@ def get_queue(worker_id: str):
 def create_patient(req: AddPatientRequest):
     """Add a new patient to an ASHA worker's queue."""
     try:
+        _sync_public_user(
+            user_id=req.asha_worker_id,
+            phone=req.asha_worker_phone or "",
+            district=req.asha_worker_district or req.district,
+        )
         patient = add_patient(
             asha_worker_id=req.asha_worker_id,
             name=req.name,
@@ -595,6 +642,10 @@ def create_patient(req: AddPatientRequest):
         return {"patient": patient}
     except RuntimeError as e:
         raise HTTPException(503, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Unable to create patient: {e}")
 
 @app.post("/api/asha/assess")
 async def asha_assess(req: ASHAAssessRequest):

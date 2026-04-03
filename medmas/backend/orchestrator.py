@@ -303,6 +303,8 @@ def response_aggregator_node(state: MedMASState) -> dict:
         parts.append("=" * 40)
         parts.append(f"Decision: {r.get('triage_decision', '').upper()}")
         parts.append(f"Refer To: {r.get('refer_to', 'PHC')}")
+        if r.get("refer_specialty"):
+            parts.append(f"Specialty: {r.get('refer_specialty')}")
         if r.get("urgency_hours"):
             parts.append(f"Urgency: Within {r.get('urgency_hours')} hours")
         parts.append(f"\n{r.get('clinical_summary', '')}")
@@ -310,6 +312,24 @@ def response_aggregator_node(state: MedMASState) -> dict:
             parts.append("\nDanger Signs to Watch:")
             for sign in r["danger_signs"]:
                 parts.append(f"  - {sign}")
+        if r.get("home_care_steps"):
+            parts.append("\nHome Care Steps:")
+            for step in r["home_care_steps"][:3]:
+                parts.append(f"  - {step}")
+        if r.get("documentation"):
+            documentation = r["documentation"]
+            parts.append("\nDocumentation Summary:")
+            if documentation.get("chief_complaint"):
+                parts.append(f"  Chief Complaint: {documentation['chief_complaint']}")
+            if documentation.get("duration"):
+                parts.append(f"  Duration: {documentation['duration']}")
+            if documentation.get("key_vitals_noted"):
+                parts.append(f"  Vitals: {documentation['key_vitals_noted']}")
+            if documentation.get("action_taken"):
+                parts.append(f"  Action Taken: {documentation['action_taken']}")
+        if r.get("asha_script"):
+            parts.append("\nSuggested ASHA Script:")
+            parts.append(r["asha_script"])
 
     # Doctor list
     if state.get("doctor_list"):
