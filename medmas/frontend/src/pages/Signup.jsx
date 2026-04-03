@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import logo from "../assets/logo.png";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -154,9 +155,7 @@ export default function Signup() {
       <div className="w-full max-w-md relative z-10 animate-scale-in">
         {/* Logo */}
         <div className="text-center mb-7">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500 to-teal-500 text-white text-2xl font-bold shadow-lg shadow-brand-500/25 mb-5">
-            M+
-          </div>
+          <img src={logo} alt="MedMAS" className="w-20 h-20 mx-auto mb-5 drop-shadow-lg" />
           <h1 className="text-3xl font-bold text-white">Create your account</h1>
           <p className="text-sm text-slate-400 mt-2">Join MedMAS — AI-powered health for rural India</p>
         </div>

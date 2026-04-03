@@ -5,6 +5,7 @@ import { ChatInput } from "@/components/ui/ai-input-001";
 import { Sparkles, Cpu, Zap } from "lucide-react";
 import { LuBrain } from "react-icons/lu";
 import { PiLightbulbFilament } from "react-icons/pi";
+import logo from "../assets/logo.png";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -68,9 +69,11 @@ export default function Chat() {
   const [messages, setMessages]       = useState([]);
   const [loading, setLoading]         = useState(false);
   const [activeAgent, setActiveAgent] = useState(null);
-  const [district, setDistrict]       = useState("Vadodara");
-  const [tab, setTab]                 = useState("chat");
-  const bottomRef                     = useRef(null);
+  const [district, setDistrict]           = useState("");
+  const [districts, setDistricts]         = useState(["Vadodara","Surat","Rajkot","Bharuch","Ahmedabad","Mumbai","Delhi"]);
+  const [locationStatus, setLocationStatus] = useState("detecting");
+  const [tab, setTab]                     = useState("chat");
+  const bottomRef                         = useRef(null);
 
   const storedUser = localStorage.getItem("medmas_user");
   const user = storedUser ? JSON.parse(storedUser) : null;
@@ -84,6 +87,42 @@ export default function Chat() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Fetch available districts from backend
+  useEffect(() => {
+    fetch(`${API_BASE}/api/districts`)
+      .then(r => r.json())
+      .then(data => { if (data.districts?.length) setDistricts(data.districts); })
+      .catch(() => {});
+  }, []);
+
+  // Auto-detect location on mount
+  useEffect(() => {
+    const fallback = user?.district || "Vadodara";
+    if (!navigator.geolocation) {
+      setDistrict(fallback);
+      setLocationStatus("done");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const res = await fetch(`${API_BASE}/api/geocode`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          });
+          const data = await res.json();
+          setDistrict(res.ok && data.district ? data.district : fallback);
+        } catch {
+          setDistrict(fallback);
+        }
+        setLocationStatus("done");
+      },
+      () => { setDistrict(fallback); setLocationStatus("denied"); },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function sendMessage(text) {
     setMessages(prev => [...prev, { id: Date.now(), role: "user", text }]);
@@ -160,9 +199,7 @@ export default function Chat() {
         <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-3">
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-teal-500 text-sm font-bold text-white shadow-md shadow-brand-500/20">
-              M+
-            </div>
+            <img src={logo} alt="MedMAS" className="h-9 w-9 rounded-xl shadow-md" />
             <div className="hidden sm:block">
               <h1 className="text-sm font-bold leading-tight text-neutral-900 dark:text-neutral-100">MedMAS</h1>
               <p className="text-[10px] leading-tight text-neutral-500">Multi-Agent AI Health System</p>
@@ -192,14 +229,16 @@ export default function Chat() {
           <div className="ml-auto flex items-center gap-2">
             <div className="hidden items-center gap-1.5 rounded-lg bg-neutral-100 px-2.5 py-1.5 text-xs text-neutral-500 sm:flex dark:bg-neutral-800">
               <LocationIcon />
-              <select
-                value={district}
-                onChange={e => setDistrict(e.target.value)}
-                className="cursor-pointer bg-transparent text-xs font-medium text-neutral-700 focus:outline-none dark:text-neutral-300">
-                {["Vadodara","Surat","Rajkot","Bharuch","Ahmedabad","Mumbai","Delhi"].map(d =>
-                  <option key={d}>{d}</option>
-                )}
-              </select>
+              {locationStatus === "detecting" ? (
+                <span className="animate-pulse text-xs font-medium text-neutral-400">Detecting...</span>
+              ) : (
+                <select
+                  value={district}
+                  onChange={e => setDistrict(e.target.value)}
+                  className="cursor-pointer bg-transparent text-xs font-medium text-neutral-700 focus:outline-none dark:text-neutral-300">
+                  {districts.map(d => <option key={d}>{d}</option>)}
+                </select>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

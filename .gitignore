@@ -1,7 +1,7 @@
 
 medmas/.env
 medmas/backend/.venv/
-medmas/frontend/node_modules/
 medmas/frontend/dist/
 medmas/backend/__pycache__/
 medmas/backend/**/*.pyc
+node_modules/
