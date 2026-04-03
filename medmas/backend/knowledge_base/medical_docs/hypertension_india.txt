@@ -1,0 +1,11 @@
+Hypertension (High Blood Pressure) in India
+India has approximately 214 million people with hypertension.
+Hypertension is defined as systolic BP ≥130 mmHg or diastolic BP ≥80 mmHg (AHA 2017).
+ICMR definition still uses ≥140/90 mmHg for Indian clinical practice.
+Stages: Normal <120/80, Elevated 120-129/<80, Stage 1: 130-139/80-89, Stage 2: ≥140/≥90.
+Symptoms: Usually silent. May include headache, blurred vision, chest pain, dizziness.
+Hypertensive crisis: Systolic >180 or diastolic >120 — requires immediate medical attention.
+Risk factors: Age, obesity, high salt intake, sedentary lifestyle, smoking, diabetes, family history.
+Complications: Stroke, heart attack, heart failure, kidney disease, vision loss.
+Treatment: Lifestyle changes + antihypertensive medications. ACE inhibitors, ARBs, CCBs, diuretics.
+Monitoring: Check BP at least every 6 months if normal; monthly if on treatment.

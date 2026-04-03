@@ -1,0 +1,27 @@
+{
+  "fever_cough": {
+    "conditions": ["COVID-19", "Influenza", "Pneumonia", "Tuberculosis"],
+    "prevalence": "high",
+    "red_flags": ["difficulty breathing", "chest pain", "blood in sputum"]
+  },
+  "chest_pain": {
+    "conditions": ["Angina", "Heart Attack", "GERD", "Costochondritis"],
+    "prevalence": "medium",
+    "red_flags": ["radiating to arm", "sweating", "shortness of breath"]
+  },
+  "fatigue_thirst": {
+    "conditions": ["Diabetes Type 2", "Anaemia", "Hypothyroidism", "Dehydration"],
+    "prevalence": "very high in India",
+    "red_flags": ["frequent urination", "blurred vision", "weight loss"]
+  },
+  "headache_vomiting": {
+    "conditions": ["Migraine", "Hypertension", "Meningitis", "Brain fever"],
+    "prevalence": "high",
+    "red_flags": ["stiff neck", "sensitivity to light", "sudden severe headache"]
+  },
+  "abdominal_pain": {
+    "conditions": ["Gastritis", "Appendicitis", "IBS", "Kidney stones"],
+    "prevalence": "high",
+    "red_flags": ["rigid abdomen", "blood in stool", "severe pain radiating to back"]
+  }
+}

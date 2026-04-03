@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:registry.watermelon.sh)",
+      "Bash(npx shadcn@latest init --defaults)",
+      "Bash(npx shadcn@latest add https://registry.watermelon.sh/r/ai-input-001.json)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest add dropdown-menu)",
+      "Bash(npx vite:*)"
+    ]
+  }
+}

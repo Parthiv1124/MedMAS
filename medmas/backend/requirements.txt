@@ -1,0 +1,38 @@
+# Core framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+
+# LangGraph / LangChain
+langgraph>=0.1.19
+langchain>=0.2.5
+langchain-openai>=0.1.8
+langchain-community>=0.2.5
+
+# Vector store & embeddings
+faiss-cpu
+# sentence-transformers>=3.0.1
+
+# PDF parsing
+pymupdf>=1.24.5
+
+# Database
+supabase==2.4.5
+
+# Translation / NLP
+deep-translator>=1.11.4
+langdetect>=1.0.9
+gtts>=2.5.1
+
+# Notifications
+apscheduler>=3.10.4
+twilio>=9.2.1
+
+# Sentiment analysis
+vaderSentiment>=3.3.2
+
+# Utilities
+pydantic>=2.7.3
+python-dotenv>=1.0.1
+pandas>=2.2.2
+httpx>=0.26.0,<0.28

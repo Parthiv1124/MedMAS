@@ -1,0 +1,45 @@
+{
+  "HbA1c": {
+    "normal":    {"max": 5.6},
+    "prediab":   {"min": 5.7, "max": 6.4},
+    "diabetic":  {"min": 6.5}
+  },
+  "fasting_glucose": {
+    "normal":    {"max": 99},
+    "prediab":   {"min": 100, "max": 125},
+    "diabetic":  {"min": 126}
+  },
+  "systolic_bp": {
+    "normal":    {"max": 119},
+    "elevated":  {"min": 120, "max": 129},
+    "stage1":    {"min": 130, "max": 139},
+    "stage2":    {"min": 140}
+  },
+  "diastolic_bp": {
+    "normal":    {"max": 79},
+    "stage1":    {"min": 80, "max": 89},
+    "stage2":    {"min": 90}
+  },
+  "total_cholesterol": {
+    "desirable":  {"max": 199},
+    "borderline": {"min": 200, "max": 239},
+    "high":       {"min": 240}
+  },
+  "LDL": {
+    "optimal":      {"max": 99},
+    "near_optimal": {"min": 100, "max": 129},
+    "borderline":   {"min": 130, "max": 159},
+    "high":         {"min": 160}
+  },
+  "BMI": {
+    "underweight": {"max": 18.4},
+    "normal":      {"min": 18.5, "max": 22.9},
+    "overweight":  {"min": 23.0, "max": 24.9},
+    "obese":       {"min": 25.0}
+  },
+  "creatinine": {
+    "normal_male":   {"max": 1.2},
+    "normal_female": {"max": 1.0},
+    "high":          {"min": 1.3}
+  }
+}
