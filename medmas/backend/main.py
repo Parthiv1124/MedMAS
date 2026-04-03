@@ -8,6 +8,7 @@ import uvicorn
 import os
 import random
 import time
+from openai import AuthenticationError
 from orchestrator import run_pipeline, medmas_graph
 from state import initial_state
 from services.doctor_finder import find_doctors
@@ -67,6 +68,11 @@ async def chat(req: ChatRequest):
             user_id=req.user_id,
             user_district=req.user_district,
             user_phone=req.user_phone,
+        )
+    except AuthenticationError:
+        raise HTTPException(
+            status_code=401,
+            detail="DeepInfra authentication failed. Check DEEPINFRA_API_KEY and DeepInfra model names in .env.",
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

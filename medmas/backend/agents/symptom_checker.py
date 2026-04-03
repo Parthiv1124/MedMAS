@@ -6,10 +6,9 @@ Uses RAG over FAISS medical KB for context-aware triage.
 Returns top-3 differential diagnoses with triage level.
 """
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from config import llm, FAISS_INDEX_PATH, EMBEDDING_MODEL, OPENAI_API_KEY
+from config import llm, FAISS_INDEX_PATH, create_embeddings
 from services.doctor_finder import find_doctors
 from state import MedMASState
 
@@ -34,7 +33,7 @@ Rules:
 """
 
 # Load FAISS once at module import (cached in memory)
-_embeddings   = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=OPENAI_API_KEY)
+_embeddings   = create_embeddings()
 _faiss_store  = FAISS.load_local(FAISS_INDEX_PATH, _embeddings, allow_dangerous_deserialization=True)
 _retriever    = _faiss_store.as_retriever(search_kwargs={"k": 5})
 

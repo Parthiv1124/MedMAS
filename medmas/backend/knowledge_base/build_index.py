@@ -2,10 +2,9 @@
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config import OPENAI_API_KEY, EMBEDDING_MODEL, PROJECT_ROOT
+from config import PROJECT_ROOT, create_embeddings
 
 DOCS_DIR   = str(PROJECT_ROOT / "backend" / "knowledge_base" / "medical_docs")
 INDEX_PATH = str(PROJECT_ROOT / "backend" / "knowledge_base" / "faiss.index")
@@ -20,7 +19,7 @@ def build_faiss_index():
     chunks = splitter.split_documents(docs)
     print(f"[FAISS] Split into {len(chunks)} chunks")
 
-    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=OPENAI_API_KEY)
+    embeddings = create_embeddings()
     index = FAISS.from_documents(chunks, embeddings)
     index.save_local(INDEX_PATH)
     print(f"[FAISS] Index saved to {INDEX_PATH}")

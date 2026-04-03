@@ -139,5 +139,5 @@ if [ $FAIL -eq 0 ]; then
     echo "  All tests passed!"
 else
     echo "  Some tests failed — check output above."
-    echo "  Tests 5-12 require a valid OPENAI_API_KEY in .env"
+    echo "  Tests 5-12 require valid DeepInfra credentials and model names in .env"
 fi
