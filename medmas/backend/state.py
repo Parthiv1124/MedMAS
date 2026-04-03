@@ -12,6 +12,8 @@ class MedMASState(TypedDict):
     user_id:          Optional[str]
     user_district:    Optional[str]
     user_phone:       Optional[str]
+    user_lat:         Optional[float]
+    user_lng:         Optional[float]
 
     # ── Safety — Global Crisis Guard ───────────────────────────────────
     crisis_detected:       bool
@@ -54,6 +56,8 @@ def initial_state(
     user_id:       str           = None,
     user_district: str           = None,
     user_phone:    str           = None,
+    user_lat:      float         = None,
+    user_lng:      float         = None,
     asha_mode:     bool          = False,
     asha_worker_id: str          = None,
     patient_id:    str           = None,
@@ -68,6 +72,8 @@ def initial_state(
         user_id=user_id,
         user_district=user_district,
         user_phone=user_phone,
+        user_lat=user_lat,
+        user_lng=user_lng,
         crisis_detected=False,
         crisis_keywords_found=[],
         intent="",

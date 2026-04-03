@@ -36,4 +36,5 @@ vaderSentiment>=3.3.2
 pydantic>=2.7.3
 python-dotenv>=1.0.1
 pandas>=2.2.2
+openai>=1.55.3,<2
 httpx>=0.26.0,<0.28

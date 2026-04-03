@@ -19,6 +19,7 @@ from services.asha_service import (
     get_assessment_history,
 )
 from config import supabase, GOOGLE_MAPS_API_KEY, DOCTORS_CSV_PATH
+from services.osm_doctor_finder import find_nearby_doctors
 from services.notifications import send_sms
 import httpx
 import pandas as pd
@@ -46,6 +47,8 @@ class ChatRequest(BaseModel):
     user_id:       Optional[str] = None
     user_district: Optional[str] = None
     user_phone:    Optional[str] = None
+    user_lat:      Optional[float] = None
+    user_lng:      Optional[float] = None
 
 class ChatResponse(BaseModel):
     response:          str
@@ -65,11 +68,13 @@ def health_check():
 async def chat(req: ChatRequest):
     """Main endpoint: accepts text query in any Indian language."""
     try:
-        result = run_pipeline(
+        result = await run_pipeline(
             raw_input=req.message,
             user_id=req.user_id,
             user_district=req.user_district,
             user_phone=req.user_phone,
+            user_lat=req.user_lat,
+            user_lng=req.user_lng,
         )
     except AuthenticationError:
         raise HTTPException(
@@ -122,7 +127,7 @@ async def upload_lab(
         raise HTTPException(400, "Only PDF files are accepted.")
     pdf_bytes = await file.read()
     try:
-        result = run_pipeline(
+        result = await run_pipeline(
             raw_input="Lab report uploaded for analysis",
             media_type="pdf",
             pdf_bytes=pdf_bytes,
@@ -143,6 +148,15 @@ async def upload_lab(
 @app.get("/api/doctors")
 def get_doctors(specialty: str = "General", district: str = ""):
     return {"doctors": find_doctors(specialty=specialty, district=district)}
+
+@app.get("/api/nearby-doctors")
+async def nearby_doctors(lat: float, lng: float, specialty: str = "General", radius: int = 5000, limit: int = 5):
+    """Fetch real nearby doctors from OpenStreetMap based on user's live location."""
+    doctors = await find_nearby_doctors(lat=lat, lng=lng, specialty=specialty, radius=radius, limit=limit)
+    if not doctors:
+        # Fallback to CSV
+        doctors = find_doctors(specialty=specialty)
+    return {"doctors": doctors, "source": "osm" if doctors and "id" in doctors[0] else "csv"}
 
 @app.get("/api/crisis-resources")
 def get_crisis_resources():
@@ -368,7 +382,7 @@ async def submit_health_score(req: HealthScoreRequest):
     """Submit lifestyle data and receive a 5-dimension health score."""
     lifestyle_json = json.dumps(req.dict())
     try:
-        result = run_pipeline(raw_input=lifestyle_json, user_id=req.user_id)
+        result = await run_pipeline(raw_input=lifestyle_json, user_id=req.user_id)
     except Exception as e:
         raise HTTPException(500, str(e))
     return {
@@ -407,6 +421,8 @@ class ASHAAssessRequest(BaseModel):
     patient_id:     str
     observations:   str
     user_district:  Optional[str] = None
+    user_lat:       Optional[float] = None
+    user_lng:       Optional[float] = None
 
 class AddPatientRequest(BaseModel):
     asha_worker_id: str
@@ -452,6 +468,8 @@ async def asha_assess(req: ASHAAssessRequest):
         raw_input=req.observations,
         media_type="text",
         user_district=req.user_district,
+        user_lat=req.user_lat,
+        user_lng=req.user_lng,
     )
     state["asha_mode"]       = True
     state["asha_worker_id"]  = req.asha_worker_id
@@ -459,7 +477,7 @@ async def asha_assess(req: ASHAAssessRequest):
     state["intent"]          = "asha"
 
     try:
-        result = medmas_graph.invoke(state)
+        result = await medmas_graph.ainvoke(state)
     except Exception as e:
         raise HTTPException(500, str(e))
 

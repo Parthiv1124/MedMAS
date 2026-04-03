@@ -12,6 +12,7 @@ from agents.empathy_chatbot import empathy_chatbot_node
 from agents.health_scorer   import health_scorer_node
 from agents.asha_copilot    import asha_copilot_node
 from services.doctor_finder import find_doctors
+from services.osm_doctor_finder import find_nearby_doctors
 
 DOCTOR_REFERRAL_FOOTER = (
     "\n\n---\n"
@@ -144,7 +145,7 @@ def session_memory_node(state: MedMASState) -> dict:
     return {"session_context": ctx}
 
 # ── Doctor Finder Node ─────────────────────────────────────────────────────
-def doctor_finder_node(state: MedMASState) -> dict:
+async def doctor_finder_node(state: MedMASState) -> dict:
     if state.get("doctor_list"):
         return {"doctor_list": state["doctor_list"]}  # Keep existing
 
@@ -160,7 +161,32 @@ def doctor_finder_node(state: MedMASState) -> dict:
     elif state.get("asha_result"):
         specialty = state["asha_result"].get("refer_specialty", "General")
 
-    doctors = find_doctors(specialty=specialty, district=state.get("user_district") or "")
+    # Try OSM real nearby doctors if user lat/lng is available
+    user_lat = state.get("user_lat")
+    user_lng = state.get("user_lng")
+    if user_lat and user_lng:
+        try:
+            osm_doctors = await find_nearby_doctors(
+                lat=user_lat, lng=user_lng, specialty=specialty, limit=5,
+            )
+            print(f"[DoctorFinder] OSM returned {len(osm_doctors)} doctors for ({user_lat},{user_lng}) specialty={specialty}")
+            if osm_doctors:
+                return {"doctor_list": osm_doctors}
+        except Exception as e:
+            print(f"[DoctorFinder] OSM failed: {e}")
+    else:
+        print(f"[DoctorFinder] No coords in state, using CSV. district={state.get('user_district')}")
+
+    # Fallback: static CSV doctors
+    district = state.get("user_district") or ""
+    # 1. Best: same district + same specialty
+    doctors = find_doctors(specialty=specialty, district=district)
+    # 2. Same district, any specialty (at least they are nearby)
+    if not doctors and district:
+        doctors = find_doctors(specialty="", district=district)
+    # 3. Last resort: matching specialty from any district
+    if not doctors:
+        doctors = find_doctors(specialty=specialty, district="")
     return {"doctor_list": doctors}
 
 # ── Response Aggregator ────────────────────────────────────────────────────
@@ -315,13 +341,15 @@ def build_graph() -> StateGraph:
 medmas_graph = build_graph()
 
 
-def run_pipeline(
+async def run_pipeline(
     raw_input:      str,
     media_type:     str   = "text",
     pdf_bytes:      bytes = None,
     user_id:        str   = None,
     user_district:  str   = None,
     user_phone:     str   = None,
+    user_lat:       float = None,
+    user_lng:       float = None,
     asha_mode:      bool  = False,
     asha_worker_id: str   = None,
     patient_id:     str   = None,
@@ -333,8 +361,10 @@ def run_pipeline(
         user_id=user_id,
         user_district=user_district,
         user_phone=user_phone,
+        user_lat=user_lat,
+        user_lng=user_lng,
         asha_mode=asha_mode,
         asha_worker_id=asha_worker_id,
         patient_id=patient_id,
     )
-    return medmas_graph.invoke(state)
+    return await medmas_graph.ainvoke(state)

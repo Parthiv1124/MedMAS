@@ -6,19 +6,16 @@ doctors_df = pd.read_csv(DOCTORS_CSV_PATH)
 
 def find_doctors(specialty: str, district: str = "", limit: int = 3) -> list:
     """
-    Filter doctors.csv by specialty and district.
-    Falls back to any doctor with that specialty if no district match.
+    Filter doctors.csv by specialty and/or district.
+    Pass specialty="" to match any specialty.
     """
-    specialty = (specialty or "General").lower()
+    specialty = (specialty or "").lower()
     district = (district or "").lower()
 
-    filtered = doctors_df[
-        (doctors_df["specialty"].str.lower() == specialty) &
-        (doctors_df["district"].str.lower() == district)
-    ] if district else pd.DataFrame()
+    df = doctors_df.copy()
+    if district:
+        df = df[df["district"].str.lower() == district]
+    if specialty:
+        df = df[df["specialty"].str.lower() == specialty]
 
-    if filtered.empty:
-        filtered = doctors_df[
-            doctors_df["specialty"].str.lower() == specialty
-        ]
-    return filtered.head(limit).to_dict(orient="records")
+    return df.head(limit).to_dict(orient="records")

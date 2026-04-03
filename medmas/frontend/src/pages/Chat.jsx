@@ -72,6 +72,7 @@ export default function Chat() {
   const [district, setDistrict]           = useState("");
   const [districts, setDistricts]         = useState(["Vadodara","Surat","Rajkot","Bharuch","Ahmedabad","Mumbai","Delhi"]);
   const [locationStatus, setLocationStatus] = useState("detecting");
+  const [userCoords, setUserCoords]       = useState(null); // {lat, lng}
   const [tab, setTab]                     = useState("chat");
   const bottomRef                         = useRef(null);
 
@@ -106,11 +107,13 @@ export default function Chat() {
     }
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserCoords(coords);
         try {
           const res = await fetch(`${API_BASE}/api/geocode`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+            body: JSON.stringify(coords),
           });
           const data = await res.json();
           setDistrict(res.ok && data.district ? data.district : fallback);
@@ -133,7 +136,7 @@ export default function Chat() {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, user_district: district }),
+        body: JSON.stringify({ message: text, user_district: district, user_lat: userCoords?.lat, user_lng: userCoords?.lng }),
       });
       const data = await res.json();
       if (data.detail) throw new Error(data.detail);
@@ -164,7 +167,7 @@ export default function Chat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           asha_worker_id: "demo-worker", patient_id: "demo-patient",
-          observations: text, user_district: district,
+          observations: text, user_district: district, user_lat: userCoords?.lat, user_lng: userCoords?.lng,
         }),
       });
       const data = await res.json();
@@ -403,11 +406,13 @@ export default function Chat() {
                               </div>
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-xs font-semibold text-neutral-800 dark:text-neutral-200">{d.name}</p>
-                                <p className="text-[10px] text-neutral-500">{d.specialty}</p>
+                                <p className="text-[10px] text-neutral-500">
+                                  {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ""}
+                                </p>
+                                {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
                               </div>
                               <div className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
-                                <PhoneIcon />
-                                {d.phone}
+                                {d.phone && <><PhoneIcon />{d.phone}</>}
                               </div>
                             </div>
                           ))}
