@@ -26,7 +26,10 @@ EMBEDDING_MODEL    = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 # Resolve all paths relative to project root
 DOCTORS_CSV_PATH   = str(PROJECT_ROOT / os.getenv("DOCTORS_CSV_PATH", "data/doctors.csv"))
 LAB_RANGES_PATH    = str(PROJECT_ROOT / os.getenv("LAB_RANGES_PATH", "data/lab_ranges.json"))
-FAISS_INDEX_PATH   = str(PROJECT_ROOT / os.getenv("FAISS_INDEX_PATH", "backend/knowledge_base/faiss.index"))
+QDRANT_URL         = os.getenv("QDRANT_URL")
+QDRANT_API_KEY     = os.getenv("QDRANT_API_KEY")
+QDRANT_COLLECTION  = os.getenv("QDRANT_COLLECTION", "medmas_medical_kb")
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 
 UNSUPPORTED_MODEL_ALIASES = {
     "gpt-4.1-mini": "meta-llama/Meta-Llama-3.1-8B-Instruct",

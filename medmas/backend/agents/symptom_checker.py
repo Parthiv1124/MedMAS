@@ -2,13 +2,14 @@
 """
 Agent 1: Symptom Checker
 Solves: Rural access gap — 920M people with no nearby doctor.
-Uses RAG over FAISS medical KB for context-aware triage.
+Uses RAG over Qdrant medical KB for context-aware triage.
 Returns top-3 differential diagnoses with triage level.
 """
-from langchain_community.vectorstores import FAISS
+from langchain_qdrant import QdrantVectorStore
+from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from config import llm, FAISS_INDEX_PATH, create_embeddings
+from config import llm, QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION, EMBEDDING_MODEL, OPENAI_API_KEY
 from services.doctor_finder import find_doctors
 from state import MedMASState
 
@@ -32,19 +33,37 @@ Rules:
 - triage_level urgent = needs care within 6 hours.
 """
 
-# Load FAISS once at module import (cached in memory)
-_embeddings   = create_embeddings()
-_faiss_store  = FAISS.load_local(FAISS_INDEX_PATH, _embeddings, allow_dangerous_deserialization=True)
-_retriever    = _faiss_store.as_retriever(search_kwargs={"k": 5})
+# Lazy-loaded Qdrant store (initialized on first use)
+_embeddings    = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=OPENAI_API_KEY)
+_qdrant_store  = None
+_retriever     = None
+
+
+def _get_retriever():
+    global _qdrant_store, _retriever
+    if _retriever is None:
+        _qdrant_store = QdrantVectorStore.from_existing_collection(
+            embedding=_embeddings,
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            collection_name=QDRANT_COLLECTION,
+        )
+        _retriever = _qdrant_store.as_retriever(search_kwargs={"k": 5})
+    return _retriever
 
 
 def symptom_checker_node(state: MedMASState) -> dict:
     """LangGraph node: Symptom triage via RAG + LLM."""
     symptoms = state["translated_input"]
 
-    # 1. Retrieve relevant medical context from FAISS
-    docs    = _retriever.get_relevant_documents(symptoms)
-    context = "\n".join(d.page_content for d in docs)
+    # 1. Retrieve relevant medical context from Qdrant
+    try:
+        retriever = _get_retriever()
+        docs    = retriever.get_relevant_documents(symptoms)
+        context = "\n".join(d.page_content for d in docs)
+    except Exception as e:
+        print(f"[SymptomChecker] Qdrant retrieval failed: {e}")
+        context = ""
 
     # 2. Invoke LLM with context
     prompt = ChatPromptTemplate.from_messages([

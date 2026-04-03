@@ -18,8 +18,10 @@ from services.asha_service import (
     save_field_assessment, update_patient_status,
     get_assessment_history,
 )
-from config import supabase
+from config import supabase, GOOGLE_MAPS_API_KEY, DOCTORS_CSV_PATH
 from services.notifications import send_sms
+import httpx
+import pandas as pd
 
 # In-memory OTP store: {phone: {"otp": "123456", "expires_at": timestamp}}
 _otp_store: dict = {}
@@ -150,6 +152,78 @@ def get_crisis_resources():
         "snehi":      {"number": "044-24640050", "hours": "24x7"},
         "emergency":  "112"
     }
+
+# ── Geocode Endpoint ─────────────────────────────────────────────────────
+class GeocodeRequest(BaseModel):
+    lat: float
+    lng: float
+
+@app.post("/api/geocode")
+async def reverse_geocode(req: GeocodeRequest):
+    """Reverse-geocode lat/lng → district using OpenStreetMap Nominatim (free)."""
+    url = "https://nominatim.openstreetmap.org/reverse"
+    params = {
+        "lat": req.lat,
+        "lon": req.lng,
+        "format": "jsonv2",
+        "addressdetails": 1,
+        "zoom": 10,
+    }
+    headers = {"User-Agent": "MedMAS/1.0 (health-app)"}
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params, headers=headers)
+        data = resp.json()
+
+    if "error" in data or "address" not in data:
+        raise HTTPException(400, "Could not resolve location")
+
+    addr = data["address"]
+    # Nominatim returns city, town, county, state_district, state etc.
+    detected_names = [
+        v for k, v in addr.items()
+        if k in ("city", "town", "city_district", "county", "state_district", "village", "suburb")
+    ]
+    # Also add state for broader matching
+    if addr.get("state"):
+        detected_names.append(addr["state"])
+
+    # Match against known districts in doctors.csv
+    try:
+        df = pd.read_csv(DOCTORS_CSV_PATH)
+        known_districts = [d.strip() for d in df["district"].dropna().unique()]
+    except Exception:
+        known_districts = ["Vadodara", "Surat", "Rajkot", "Bharuch", "Ahmedabad", "Mumbai", "Delhi"]
+
+    # Try exact match first
+    for name in detected_names:
+        for kd in known_districts:
+            if name.lower() == kd.lower():
+                return {"district": kd, "detected": name, "matched": True}
+
+    # Try partial/substring match (e.g. "Vadodara District" contains "Vadodara")
+    for name in detected_names:
+        for kd in known_districts:
+            if kd.lower() in name.lower() or name.lower() in kd.lower():
+                return {"district": kd, "detected": name, "matched": True}
+
+    # No match — return detected name + known districts for fallback
+    return {
+        "district": detected_names[0] if detected_names else "",
+        "detected": detected_names[0] if detected_names else "",
+        "matched": False,
+        "known_districts": known_districts,
+    }
+
+@app.get("/api/districts")
+def list_districts():
+    """Return all distinct districts available in doctors.csv."""
+    try:
+        df = pd.read_csv(DOCTORS_CSV_PATH)
+        districts = sorted(df["district"].dropna().unique().tolist())
+    except Exception:
+        districts = ["Vadodara", "Surat", "Rajkot", "Bharuch", "Ahmedabad", "Mumbai", "Delhi"]
+    return {"districts": districts}
 
 # ── OTP Models & Endpoints ────────────────────────────────────────────────
 OTP_EXPIRY_SECONDS = 600  # 10 minutes

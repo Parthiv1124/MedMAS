@@ -1,2 +1,3 @@
-./medmas/frontend/node_modules
+
 medmas/.env
+node_modules/
