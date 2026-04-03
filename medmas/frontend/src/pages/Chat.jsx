@@ -64,6 +64,16 @@ const PhoneIcon = () => (
   </svg>
 );
 
+function getVisibleMessageText(text, doctors) {
+  if (!text) return "";
+  if (!doctors?.length) return text;
+
+  return text
+    .replace(/\n?NEARBY DOCTORS[\s\S]*?(?=\n---\n|$)/, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default function Chat() {
   const navigate = useNavigate();
   const [messages, setMessages]       = useState([]);
@@ -343,6 +353,7 @@ export default function Chat() {
               const isUser = msg.role === "user";
               const agent = msg.intent && AGENT_INFO[msg.intent];
               const triage = msg.triage && TRIAGE[msg.triage];
+              const visibleText = getVisibleMessageText(msg.text, msg.doctors);
 
               return (
                 <motion.div
@@ -393,7 +404,9 @@ export default function Chat() {
                         ? "rounded-tr-none border border-neutral-900 bg-neutral-900 text-white dark:border-neutral-700 dark:bg-neutral-800"
                         : "rounded-tl-none border border-neutral-200 bg-white text-neutral-800 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200"
                     }`}>
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                      {visibleText && (
+                        <p className="whitespace-pre-wrap">{visibleText}</p>
+                      )}
 
                       {/* Doctor cards */}
                       {msg.doctors?.length > 0 && (

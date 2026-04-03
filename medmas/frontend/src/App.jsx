@@ -47,6 +47,16 @@ const BotIcon = () => (
   </svg>
 );
 
+function getVisibleMessageText(text, doctors) {
+  if (!text) return "";
+  if (!doctors?.length) return text;
+
+  return text
+    .replace(/\n?NEARBY DOCTORS[\s\S]*?(?=\n---\n|$)/, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default function App() {
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
@@ -288,6 +298,7 @@ export default function App() {
             const isUser = msg.role === "user";
             const agent = msg.intent && AGENT_INFO[msg.intent];
             const triage = msg.triage && TRIAGE[msg.triage];
+            const visibleText = getVisibleMessageText(msg.text, msg.doctors);
 
             return (
               <div
@@ -337,7 +348,9 @@ export default function App() {
                     ? "bg-gradient-to-br from-brand-600 to-brand-700 text-white shadow-md shadow-brand-500/15"
                     : "glass border border-gray-200/60 text-gray-800"
                     }`}>
-                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                    {visibleText && (
+                      <p className="whitespace-pre-wrap">{visibleText}</p>
+                    )}
 
                     {/* Doctor cards */}
                     {msg.doctors?.length > 0 && (
