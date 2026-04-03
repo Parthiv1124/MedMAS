@@ -61,6 +61,7 @@ def initial_state(
     asha_mode:      bool          = False,
     asha_worker_id: str           = None,
     patient_id:     str           = None,
+    session_context: dict         = None,
     session_history: list         = None,
 ) -> MedMASState:
     """Create a fresh MedMASState for a new request."""
@@ -80,7 +81,7 @@ def initial_state(
         intent="",
         agents_to_run=[],
         routing_confidence=0.0,
-        session_context={},
+        session_context=session_context or {},
         session_history=session_history or [],
         symptom_result=None,
         disease_result=None,

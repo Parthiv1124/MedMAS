@@ -33,6 +33,16 @@ import pandas as pd
 # In-memory OTP store: {phone: {"otp": "123456", "expires_at": timestamp}}
 _otp_store: dict = {}
 
+
+def _parse_json_field(raw: Optional[str], default):
+    if not raw:
+        return default
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return default
+    return value if isinstance(value, type(default)) else default
+
 app = FastAPI(
     title="MedMAS API",
     description="Multi-Agent AI Health System for Rural India",
@@ -55,6 +65,7 @@ class ChatRequest(BaseModel):
     user_phone:    Optional[str] = None
     user_lat:      Optional[float] = None
     user_lng:      Optional[float] = None
+    session_context: Optional[dict] = None
     chat_history:  List[dict] = []
 
 class ChatResponse(BaseModel):
@@ -66,6 +77,7 @@ class ChatResponse(BaseModel):
     health_score:      Optional[int] = None
     crisis_detected:   bool = False
     symptom_result:    Optional[dict] = None
+    session_context:   dict = {}
 
 
 class TranscriptionResponse(BaseModel):
@@ -88,6 +100,7 @@ async def chat(req: ChatRequest):
             user_phone=req.user_phone,
             user_lat=req.user_lat,
             user_lng=req.user_lng,
+            session_context=req.session_context or {},
             session_history=req.chat_history,
         )
     except AuthenticationError:
@@ -128,6 +141,7 @@ async def chat(req: ChatRequest):
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
+        session_context=result.get("session_context", {}),
     )
 
 @app.post("/api/chat/upload")
@@ -139,6 +153,8 @@ async def chat_upload(
     user_phone:    str              = Form(None),
     user_lat:      float            = Form(None),
     user_lng:      float            = Form(None),
+    chat_history:  str              = Form("[]"),
+    session_context: str            = Form("{}"),
 ):
     """Chat endpoint that accepts file attachments (images + documents)."""
     from services.image_parser import extract_text_from_image
@@ -170,6 +186,8 @@ async def chat_upload(
         enriched = enriched + "\n\n" + "\n\n".join(extracted_parts)
 
     media_type = "pdf" if pdf_bytes_combined else "text"
+    parsed_history = _parse_json_field(chat_history, [])
+    parsed_context = _parse_json_field(session_context, {})
 
     try:
         result = await run_pipeline(
@@ -181,6 +199,8 @@ async def chat_upload(
             user_phone=user_phone,
             user_lat=user_lat,
             user_lng=user_lng,
+            session_context=parsed_context,
+            session_history=parsed_history,
         )
     except AuthenticationError:
         raise HTTPException(401, "DeepInfra authentication failed.")
@@ -200,6 +220,7 @@ async def chat_upload(
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
+        session_context=result.get("session_context", {}),
     )
 
 @app.post("/api/upload-lab")
@@ -557,6 +578,7 @@ class ASHAAssessRequest(BaseModel):
     user_district:  Optional[str] = None
     user_lat:       Optional[float] = None
     user_lng:       Optional[float] = None
+    session_context: Optional[dict] = None
     chat_history:   List[dict] = []
 
 class AddPatientRequest(BaseModel):
@@ -605,6 +627,7 @@ async def asha_assess(req: ASHAAssessRequest):
         user_district=req.user_district,
         user_lat=req.user_lat,
         user_lng=req.user_lng,
+        session_context=req.session_context or {},
         session_history=req.chat_history,
     )
     state["asha_mode"]       = True

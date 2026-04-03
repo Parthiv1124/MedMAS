@@ -21,6 +21,39 @@ DOCTOR_REFERRAL_FOOTER = (
     "In an emergency, call 112."
 )
 
+MENTAL_KEYWORDS = (
+    "stress", "stressed", "anxiety", "anxious", "panic", "overwhelmed",
+    "depressed", "depression", "sad", "low", "lonely", "burnout",
+    "burned out", "can't sleep", "cannot sleep", "not sleeping",
+    "sleep", "insomnia", "worry", "worried", "mental", "emotionally",
+)
+LAB_KEYWORDS = (
+    "hba1c", "glucose", "blood sugar", "cholesterol", "cbc", "creatinine",
+    "hemoglobin", "bp", "blood pressure", "lab report", "report",
+)
+DOCTOR_KEYWORDS = (
+    "doctor", "specialist", "clinic", "hospital", "nearby doctor",
+    "find a doctor", "appointment",
+)
+REMINDER_KEYWORDS = (
+    "reminder", "remind me", "medicine reminder", "tablet reminder",
+    "medication reminder", "checkup reminder",
+)
+LIFESTYLE_KEYWORDS = (
+    "diet", "exercise", "workout", "steps", "calories", "nutrition",
+    "habit", "habits", "health score", "lifestyle", "weight loss",
+)
+SYMPTOM_KEYWORDS = (
+    "fever", "cough", "pain", "vomit", "vomiting", "nausea", "diarrhea",
+    "rash", "swelling", "headache", "dizzy", "dizziness", "chest pain",
+    "breathing", "shortness of breath", "infection",
+)
+FOLLOW_UP_PREFIXES = (
+    "because", "due to", "it is due to", "it's due to", "its due to",
+    "from", "mainly", "mostly", "related to", "caused by", "since",
+    "after", "yes", "no", "sometimes", "often",
+)
+
 # ── Context helper ─────────────────────────────────────────────────────────
 def _format_history(session_history: list, max_turns: int = 6) -> str:
     """Format the last N turn-pairs from session_history into a readable block."""
@@ -34,6 +67,92 @@ def _format_history(session_history: list, max_turns: int = 6) -> str:
         if content:
             lines.append(f"{role}: {content}")
     return "\n".join(lines)
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _recent_user_messages(session_history: list, limit: int = 3) -> list[str]:
+    recent = []
+    for turn in reversed(session_history or []):
+        if turn.get("role") != "user":
+            continue
+        content = (turn.get("content") or "").strip()
+        if content:
+            recent.append(content)
+        if len(recent) >= limit:
+            break
+    return list(reversed(recent))
+
+
+def _last_history_intent(session_history: list) -> str:
+    for turn in reversed(session_history or []):
+        intent = (turn.get("intent") or "").strip().lower()
+        if intent:
+            return intent
+    return ""
+
+
+def _looks_like_follow_up(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    words = normalized.split()
+    if len(words) > 14:
+        return False
+    if normalized in {"yes", "no", "sometimes", "often", "rarely"}:
+        return True
+    return normalized.startswith(FOLLOW_UP_PREFIXES)
+
+
+def _explicit_intent_for_text(text: str) -> str | None:
+    if _contains_any(text, MENTAL_KEYWORDS):
+        return "mental"
+    if _contains_any(text, LAB_KEYWORDS):
+        return "lab"
+    if _contains_any(text, DOCTOR_KEYWORDS):
+        return "doctor"
+    if _contains_any(text, REMINDER_KEYWORDS):
+        return "reminder"
+    if _contains_any(text, LIFESTYLE_KEYWORDS):
+        return "lifestyle"
+    if _contains_any(text, SYMPTOM_KEYWORDS):
+        return "symptom"
+    return None
+
+
+def _infer_contextual_intent(state: MedMASState) -> str | None:
+    text = _normalize_text(state.get("translated_input", ""))
+    if not text:
+        return None
+
+    explicit = _explicit_intent_for_text(text)
+    if explicit:
+        return explicit
+
+    session_history = state.get("session_history", [])
+    session_context = state.get("session_context") or {}
+    previous_intent = str(
+        session_context.get("last_intent") or _last_history_intent(session_history) or ""
+    ).lower()
+    recent_user_history = _normalize_text(" ".join(_recent_user_messages(session_history)))
+    recent_mental_history = _contains_any(recent_user_history, MENTAL_KEYWORDS)
+
+    if previous_intent == "mental":
+        if _looks_like_follow_up(text):
+            return "mental"
+        if recent_mental_history and len(text.split()) <= 18:
+            return "mental"
+
+    if recent_mental_history and _looks_like_follow_up(text):
+        return "mental"
+
+    return None
 
 # ── Intent Classifier ──────────────────────────────────────────────────────
 INTENT_PROMPT = """Classify this query into exactly one category.
@@ -50,29 +169,13 @@ reminder  - user wants to set a medication or checkup reminder
 offtopic  - NOT related to health/medical/wellness at all (e.g. sports, politics, weather, math, jokes, coding, general chitchat, greetings like "hi" or "hello")
 
 IMPORTANT: Only classify as offtopic if the query has absolutely NO connection to health, medicine, wellness, symptoms, mental health, or lifestyle. When in doubt, prefer a medical category.
+IMPORTANT: If the latest query is a short follow-up to the prior conversation, preserve the existing topic unless the user clearly changes topics.
 
 Query: {query}
 
 Respond with ONLY the category label, nothing else."""
 
 def intent_classifier_node(state: MedMASState) -> dict:
-    # If crisis guard already set intent, respect it
-    if state.get("crisis_detected") and state.get("intent") == "mental":
-        return {"intent": "mental", "agents_to_run": ["empathy_chatbot"]}
-
-    # If ASHA mode forced intent, respect it
-    if state.get("asha_mode") and state.get("intent") == "asha":
-        return {"intent": "asha", "agents_to_run": ["asha_copilot"]}
-
-    history_text = _format_history(state.get("session_history", []))
-    query = state["translated_input"]
-    if history_text:
-        query = f"Conversation so far:\n{history_text}\n\nLatest query: {query}"
-
-    prompt  = ChatPromptTemplate.from_template(INTENT_PROMPT)
-    chain   = prompt | llm | StrOutputParser()
-    intent  = chain.invoke({"query": query}).strip().lower()
-
     agent_map = {
         "symptom":   ["symptom_checker"],
         "lab":       ["disease_predictor"],
@@ -83,6 +186,31 @@ def intent_classifier_node(state: MedMASState) -> dict:
         "reminder":  ["health_scorer"],
         "offtopic":  ["offtopic_responder"],
     }
+
+    # If crisis guard already set intent, respect it
+    if state.get("crisis_detected") and state.get("intent") == "mental":
+        return {"intent": "mental", "agents_to_run": ["empathy_chatbot"]}
+
+    # If ASHA mode forced intent, respect it
+    if state.get("asha_mode") and state.get("intent") == "asha":
+        return {"intent": "asha", "agents_to_run": ["asha_copilot"]}
+
+    contextual_intent = _infer_contextual_intent(state)
+    if contextual_intent:
+        return {
+            "intent": contextual_intent,
+            "agents_to_run": agent_map.get(contextual_intent, ["symptom_checker"]),
+        }
+
+    history_text = _format_history(state.get("session_history", []))
+    query = state["translated_input"]
+    if history_text:
+        query = f"Conversation so far:\n{history_text}\n\nLatest query: {query}"
+
+    prompt  = ChatPromptTemplate.from_template(INTENT_PROMPT)
+    chain   = prompt | llm | StrOutputParser()
+    intent  = chain.invoke({"query": query}).strip().lower()
+
     agents = agent_map.get(intent, ["symptom_checker"])
     return {"intent": intent, "agents_to_run": agents}
 
@@ -165,6 +293,8 @@ def session_memory_node(state: MedMASState) -> dict:
     ctx["combined_diabetes_alert"] = bool(
         ctx.get("has_diabetes_risk") and ctx.get("high_stress")
     )
+    ctx["last_intent"] = state.get("intent", "")
+    ctx["last_triage_level"] = state.get("triage_level", "routine")
     return {"session_context": ctx}
 
 # ── Doctor Finder Node ─────────────────────────────────────────────────────
@@ -391,6 +521,7 @@ async def run_pipeline(
     asha_mode:       bool  = False,
     asha_worker_id:  str   = None,
     patient_id:      str   = None,
+    session_context: dict  = None,
     session_history: list  = None,
 ) -> MedMASState:
     state = initial_state(
@@ -405,6 +536,7 @@ async def run_pipeline(
         asha_mode=asha_mode,
         asha_worker_id=asha_worker_id,
         patient_id=patient_id,
+        session_context=session_context or {},
         session_history=session_history or [],
     )
     return await medmas_graph.ainvoke(state)

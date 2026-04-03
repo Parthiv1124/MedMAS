@@ -44,6 +44,10 @@ function makeTitle(text) {
   return (text || "New Chat").trim().slice(0, 52) || "New Chat";
 }
 
+function getSessionContext(sessions, sessionId) {
+  return sessions.find((session) => session.id === sessionId)?.sessionContext || {};
+}
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const AGENT_INFO = {
@@ -207,13 +211,13 @@ export default function Chat() {
   const currentSessionRef = useRef(null); // mirror for async closures
 
   // ── Session helpers ────────────────────────────────────────────────────────
-  const persistExchange = useCallback((sessionId, userMsg, assistantMsg) => {
+  const persistExchange = useCallback((sessionId, userMsg, assistantMsg, sessionPatch = {}) => {
     // Append only the NEW pair — avoids re-reading stale data or double-writing
     appendMessages(sessionId, [userMsg, assistantMsg]);
     setSessions((prev) => {
       const now = new Date().toISOString();
       const updated = prev
-        .map((s) => (s.id === sessionId ? { ...s, updatedAt: now } : s))
+        .map((s) => (s.id === sessionId ? { ...s, ...sessionPatch, updatedAt: now } : s))
         .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); // keep most-recent first
       writeSessions(updated);
       return updated;
@@ -329,7 +333,7 @@ export default function Chat() {
     return currentMessages
       .filter(m => m.text?.trim())
       .slice(-limit)
-      .map(m => ({ role: m.role, content: m.text }));
+      .map(m => ({ role: m.role, content: m.text, intent: m.intent || null }));
   }
 
   async function sendMessage(text, files = []) {
@@ -362,6 +366,7 @@ export default function Chat() {
         tab,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        sessionContext: {},
       };
       currentSessionRef.current = sessionId;
       setCurrentSessionId(sessionId);
@@ -378,12 +383,15 @@ export default function Chat() {
 
     try {
       let res;
+      const sessionContext = getSessionContext(sessions, sessionId);
       if (files.length > 0) {
         const formData = new FormData();
         formData.append("message", text || "");
         if (district) formData.append("user_district", district);
         if (userCoords?.lat) formData.append("user_lat", String(userCoords.lat));
         if (userCoords?.lng) formData.append("user_lng", String(userCoords.lng));
+        formData.append("chat_history", JSON.stringify(chatHistory));
+        formData.append("session_context", JSON.stringify(sessionContext));
         files.forEach((f) => formData.append("files", f));
         res = await fetch(`${API_BASE}/api/chat/upload`, { method: "POST", body: formData });
       } else {
@@ -395,6 +403,7 @@ export default function Chat() {
             user_district: district,
             user_lat: userCoords?.lat,
             user_lng: userCoords?.lng,
+            session_context: sessionContext,
             chat_history: chatHistory,
           }),
         });
@@ -415,7 +424,9 @@ export default function Chat() {
       setMessages(prev => [...prev, assistantMsg]);
 
       // Persist exchange — use the same userMsg object that was given to the UI
-      persistExchange(sessionId, userMsg, assistantMsg);
+      persistExchange(sessionId, userMsg, assistantMsg, {
+        sessionContext: data.session_context || {},
+      });
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
@@ -435,6 +446,7 @@ export default function Chat() {
         tab: "asha",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        sessionContext: {},
       };
       currentSessionRef.current = sessionId;
       setCurrentSessionId(sessionId);
@@ -457,12 +469,14 @@ export default function Chat() {
     setActiveAgent("ASHA Copilot");
 
     try {
+      const sessionContext = getSessionContext(sessions, sessionId);
       const res = await fetch(`${API_BASE}/api/asha/assess`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           asha_worker_id: "demo-worker", patient_id: "demo-patient",
           observations: text, user_district: district, user_lat: userCoords?.lat, user_lng: userCoords?.lng,
+          session_context: sessionContext,
           chat_history: chatHistory,
         }),
       });
@@ -477,7 +491,9 @@ export default function Chat() {
         asha: data.asha_result,
       };
       setMessages(prev => [...prev, assistantMsg]);
-      persistExchange(sessionId, userMsg, assistantMsg);
+      persistExchange(sessionId, userMsg, assistantMsg, {
+        sessionContext: data.session_context || {},
+      });
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
