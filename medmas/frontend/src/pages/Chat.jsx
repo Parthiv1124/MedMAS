@@ -63,6 +63,26 @@ const PhoneIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
   </svg>
 );
+const ArrowUpRightIcon = () => (
+  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7 17L17 7M10 7h7v7" />
+  </svg>
+);
+
+const GENERIC_FACILITY_NAMES = new Set([
+  "primary health centre",
+  "primary health center",
+  "community health centre",
+  "community health center",
+  "health centre",
+  "health center",
+  "subcentre",
+  "sub center",
+  "sub centre",
+  "subcenter",
+  "hospital",
+  "clinic",
+]);
 
 function getVisibleMessageText(text, doctors) {
   if (!text) return "";
@@ -72,6 +92,39 @@ function getVisibleMessageText(text, doctors) {
     .replace(/\n?NEARBY DOCTORS[\s\S]*?(?=\n---\n|$)/, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function isGenericFacilityName(name) {
+  return GENERIC_FACILITY_NAMES.has(
+    (name || "")
+      .toLowerCase()
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+function getDoctorMapsUrl(doctor, district) {
+  const name = doctor?.name?.trim();
+  const address = doctor?.address?.trim();
+  const lat = Number(doctor?.lat);
+  const lng = Number(doctor?.lng ?? doctor?.lon);
+
+  if (!name) return null;
+
+  if (isGenericFacilityName(name)) {
+    const contextualQuery = [name, address, district].filter(Boolean).join(", ");
+
+    if (contextualQuery && contextualQuery !== name) {
+      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contextualQuery)}`;
+    }
+
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}`;
+    }
+  }
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`;
 }
 
 export default function Chat() {
@@ -205,22 +258,22 @@ export default function Chat() {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="relative flex h-screen w-full flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+    <div className="relative flex h-screen w-full flex-col overflow-hidden bg-chat-grid">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white/80 backdrop-blur-xl dark:border-neutral-800 dark:bg-neutral-950/80">
+      <header className="glass-liquid sticky top-0 z-30 border-b border-white/35">
         <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-3">
           {/* Logo */}
           <div className="flex items-center gap-3">
             <img src={logo} alt="MedMAS" className="h-9 w-9 rounded-xl shadow-md" />
             <div className="hidden sm:block">
-              <h1 className="text-sm font-bold leading-tight text-neutral-900 dark:text-neutral-100">MedMAS</h1>
+              <h1 className="text-sm font-bold leading-tight text-neutral-900">MedMAS</h1>
               <p className="text-[10px] leading-tight text-neutral-500">Multi-Agent AI Health System</p>
             </div>
           </div>
 
           {/* Tabs */}
-          <div className="ml-2 flex rounded-xl bg-neutral-100 p-0.5 dark:bg-neutral-800">
+          <div className="glass-liquid ml-2 flex rounded-xl p-0.5">
             {[
               { id: "chat", label: "Patient", emoji: "\uD83E\uDE7A" },
               { id: "asha", label: "ASHA",    emoji: "\uD83D\uDC69\u200D\u2695\uFE0F" },
@@ -230,8 +283,8 @@ export default function Chat() {
                 onClick={() => setTab(t.id)}
                 className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
                   tab === t.id
-                    ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-                    : "text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
+                    ? "glass-liquid-strong text-neutral-900 shadow-sm"
+                    : "text-neutral-600 hover:text-neutral-900"
                 }`}>
                 <span className="mr-1">{t.emoji}</span>{t.label}
               </button>
@@ -240,7 +293,7 @@ export default function Chat() {
 
           {/* District + User */}
           <div className="ml-auto flex items-center gap-2">
-            <div className="hidden items-center gap-1.5 rounded-lg bg-neutral-100 px-2.5 py-1.5 text-xs text-neutral-500 sm:flex dark:bg-neutral-800">
+            <div className="glass-liquid hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-neutral-500 sm:flex">
               <LocationIcon />
               {locationStatus === "detecting" ? (
                 <span className="animate-pulse text-xs font-medium text-neutral-400">Detecting...</span>
@@ -248,7 +301,7 @@ export default function Chat() {
                 <select
                   value={district}
                   onChange={e => setDistrict(e.target.value)}
-                  className="cursor-pointer bg-transparent text-xs font-medium text-neutral-700 focus:outline-none dark:text-neutral-300">
+                  className="cursor-pointer bg-transparent text-xs font-medium text-neutral-900 focus:outline-none">
                   {districts.map(d => <option key={d}>{d}</option>)}
                 </select>
               )}
@@ -256,11 +309,11 @@ export default function Chat() {
 
             <div className="flex items-center gap-2">
               {user && (
-                <div className="hidden items-center gap-2 rounded-lg bg-neutral-100 px-2.5 py-1.5 md:flex dark:bg-neutral-800">
+                <div className="glass-liquid hidden items-center gap-2 rounded-lg px-2.5 py-1.5 md:flex">
                   <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-teal-500 text-[9px] font-bold text-white">
                     {(user.name || user.email || "U")[0].toUpperCase()}
                   </div>
-                  <span className="max-w-[100px] truncate text-xs font-medium text-neutral-700 dark:text-neutral-300">{user.name || user.email}</span>
+                  <span className="max-w-[100px] truncate text-xs font-medium text-neutral-900">{user.name || user.email}</span>
                 </div>
               )}
               <button
@@ -284,8 +337,8 @@ export default function Chat() {
             className="mx-auto w-full max-w-4xl px-4 pt-3">
             <div className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 ${
               agentInfo
-                ? "border-brand-200/50 bg-brand-50/80 dark:border-brand-800/50 dark:bg-brand-950/30"
-                : "border-neutral-200/50 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900"
+                ? "glass-liquid-accent border-sky-100/60"
+                : "glass-liquid border-white/40"
             }`}>
               {agentInfo ? (
                 <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br ${agentInfo.color} text-[9px] font-bold text-white shadow-sm`}>
@@ -297,7 +350,7 @@ export default function Chat() {
                 </div>
               )}
               <div>
-                <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{activeAgent || "Processing..."}</p>
+                <p className="text-xs font-semibold text-neutral-900">{activeAgent || "Processing..."}</p>
                 <p className="text-[10px] text-neutral-500">Agent pipeline active</p>
               </div>
               <div className="ml-auto flex gap-1">
@@ -325,7 +378,7 @@ export default function Chat() {
                 <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500/10 to-teal-500/10">
                   <span className="text-3xl">{tab === "asha" ? "\uD83D\uDC69\u200D\u2695\uFE0F" : "\uD83E\uDE7A"}</span>
                 </div>
-                <h2 className="mb-2 text-lg font-semibold text-neutral-800 dark:text-neutral-200">
+                <h2 className="mb-2 text-lg font-semibold text-neutral-900">
                   {tab === "asha" ? "ASHA Worker Console" : "How can I help you today?"}
                 </h2>
                 <p className="mb-8 max-w-sm text-center text-sm text-neutral-500">
@@ -401,8 +454,8 @@ export default function Chat() {
                     {/* Bubble */}
                     <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                       isUser
-                        ? "rounded-tr-none border border-neutral-900 bg-neutral-900 text-white dark:border-neutral-700 dark:bg-neutral-800"
-                        : "rounded-tl-none border border-neutral-200 bg-white text-neutral-800 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200"
+                        ? "glass-liquid-accent rounded-tr-none border border-white/60 text-neutral-950"
+                        : "glass-liquid rounded-tl-none border border-white/50 text-neutral-950"
                     }`}>
                       {visibleText && (
                         <p className="whitespace-pre-wrap">{visibleText}</p>
@@ -412,13 +465,26 @@ export default function Chat() {
                       {msg.doctors?.length > 0 && (
                         <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3 dark:border-neutral-700/40">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Nearby Doctors</p>
-                          {msg.doctors.slice(0, 3).map((d, j) => (
-                            <div key={j} className="flex items-center gap-2.5 rounded-lg border border-neutral-100 bg-white/60 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800/60">
+                          {msg.doctors.slice(0, 3).map((d, j) => {
+                            const mapsUrl = getDoctorMapsUrl(d, district);
+
+                            return (
+                            <a
+                              key={j}
+                              href={mapsUrl || "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`Open ${d.name || "doctor location"} in Google Maps`}
+                              onClick={event => {
+                                if (!mapsUrl) event.preventDefault();
+                              }}
+                              className="glass-liquid flex items-center gap-2.5 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40"
+                            >
                               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
                                 {(d.name || "D")[0]}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-semibold text-neutral-800 dark:text-neutral-200">{d.name}</p>
+                                <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
                                 <p className="text-[10px] text-neutral-500">
                                   {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ""}
                                 </p>
@@ -427,8 +493,13 @@ export default function Chat() {
                               <div className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
                                 {d.phone && <><PhoneIcon />{d.phone}</>}
                               </div>
-                            </div>
-                          ))}
+                              <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
+                                <span>Map</span>
+                                <ArrowUpRightIcon />
+                              </div>
+                            </a>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -460,7 +531,7 @@ export default function Chat() {
                     ))}
                   </div>
                 </div>
-                <div className="rounded-2xl rounded-tl-none border border-neutral-200 bg-white px-5 py-3.5 dark:border-neutral-800 dark:bg-neutral-900">
+                <div className="glass-liquid rounded-2xl rounded-tl-none border border-white/45 px-5 py-3.5">
                   <div className="flex items-center gap-1.5">
                     {[0, 200, 400].map(d => (
                       <div key={d} className="h-2 w-2 rounded-full bg-neutral-400" style={{ animation: "typing 1.4s infinite", animationDelay: `${d}ms` }} />
@@ -485,7 +556,7 @@ export default function Chat() {
       />
 
       {/* ── Footer info ─────────────────────────────────────── */}
-      <div className="flex items-center justify-between border-t border-neutral-200 bg-white/80 px-4 py-1.5 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/80">
+      <div className="glass-liquid flex items-center justify-between border-t border-white/35 px-4 py-1.5">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between">
           <div className="flex items-center gap-1.5">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />

@@ -153,7 +153,7 @@ export const ChatInput = ({
       }`}>
       <motion.div
         layout
-        className="w-full max-w-3xl rounded-2xl border border-neutral-200 bg-white p-3 shadow-lg sm:rounded-[24px] dark:border-neutral-800 dark:bg-neutral-900">
+        className="glass-liquid-strong w-full max-w-5xl rounded-2xl border border-white/50 p-3 shadow-lg sm:rounded-[24px]">
         <textarea
           ref={textAreaRef}
           value={inputValue}
@@ -165,11 +165,11 @@ export const ChatInput = ({
             }
           }}
           placeholder={placeholder}
-          className="mb-2 max-h-[180px] min-h-[40px] w-full resize-none bg-transparent px-1 text-sm font-semibold text-neutral-700 outline-none placeholder:text-neutral-400 sm:max-h-[200px] sm:min-h-[44px] sm:px-2 sm:text-base dark:text-neutral-300 dark:placeholder:text-neutral-600"
+          className="mb-2 max-h-[180px] min-h-[40px] w-full resize-none bg-transparent px-1 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-500 sm:max-h-[200px] sm:min-h-[44px] sm:px-2 sm:text-base"
           rows={1} />
 
         <div
-          className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-2 dark:border-neutral-800 dark:bg-neutral-950">
+          className="glass-liquid mt-2 flex items-center justify-between gap-2 rounded-xl border border-white/40 p-2">
           <div className="no-scrollbar flex items-center gap-1 overflow-x-auto sm:gap-2">
             <AttachmentMenu />
           </div>
@@ -179,8 +179,8 @@ export const ChatInput = ({
             disabled={!inputValue.trim()}
             className={`rounded-lg p-2 transition-colors sm:p-3 ${
               inputValue.trim()
-                ? "bg-blue-600 text-white dark:bg-blue-500"
-                : "cursor-not-allowed bg-neutral-200 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-600"
+                ? "glass-liquid-accent text-neutral-950"
+                : "cursor-not-allowed border border-white/30 bg-white/30 text-neutral-400 dark:bg-white/5 dark:text-neutral-500"
             }`}>
             <Send className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>

@@ -97,6 +97,82 @@
     @apply bg-slate-900/60 backdrop-blur-xl border border-white/10;
   }
 
+  .glass-liquid {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.48)),
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.6), transparent 42%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow:
+      0 20px 45px rgba(15, 23, 42, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7),
+      inset 0 -1px 0 rgba(148, 163, 184, 0.14);
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+  }
+
+  .glass-liquid-strong {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(241, 245, 249, 0.56)),
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.8), transparent 40%),
+      radial-gradient(circle at bottom right, rgba(125, 211, 252, 0.14), transparent 46%);
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    box-shadow:
+      0 24px 50px rgba(15, 23, 42, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      inset 0 -1px 0 rgba(148, 163, 184, 0.16);
+    backdrop-filter: blur(28px) saturate(170%);
+    -webkit-backdrop-filter: blur(28px) saturate(170%);
+  }
+
+  .glass-liquid-accent {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.24)),
+      radial-gradient(circle at top left, rgba(191, 219, 254, 0.34), transparent 42%),
+      radial-gradient(circle at bottom right, rgba(153, 246, 228, 0.18), transparent 44%);
+    border: 1px solid rgba(255, 255, 255, 0.58);
+    box-shadow:
+      0 22px 46px rgba(14, 116, 144, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      inset 0 -1px 0 rgba(148, 163, 184, 0.16);
+    backdrop-filter: blur(26px) saturate(170%);
+    -webkit-backdrop-filter: blur(26px) saturate(170%);
+  }
+
+  .dark .glass-liquid {
+    background:
+      linear-gradient(180deg, rgba(17, 24, 39, 0.7), rgba(17, 24, 39, 0.42)),
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.14), transparent 38%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+      0 24px 48px rgba(0, 0, 0, 0.26),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 -1px 0 rgba(148, 163, 184, 0.08);
+  }
+
+  .dark .glass-liquid-strong {
+    background:
+      linear-gradient(180deg, rgba(17, 24, 39, 0.78), rgba(15, 23, 42, 0.5)),
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.18), transparent 36%),
+      radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.14), transparent 40%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow:
+      0 30px 60px rgba(0, 0, 0, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -1px 0 rgba(148, 163, 184, 0.08);
+  }
+
+  .dark .glass-liquid-accent {
+    background:
+      linear-gradient(180deg, rgba(12, 18, 31, 0.72), rgba(15, 23, 42, 0.44)),
+      radial-gradient(circle at top left, rgba(96, 165, 250, 0.22), transparent 38%),
+      radial-gradient(circle at bottom right, rgba(45, 212, 191, 0.16), transparent 42%);
+    border: 1px solid rgba(186, 230, 253, 0.18);
+    box-shadow:
+      0 26px 54px rgba(2, 8, 23, 0.34),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -1px 0 rgba(148, 163, 184, 0.08);
+  }
+
   /* Gradient text */
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-600 via-brand-500 to-teal-500;
@@ -109,6 +185,30 @@
       radial-gradient(at 80% 10%, rgba(5,200,172,0.1) 0px, transparent 50%),
       radial-gradient(at 50% 80%, rgba(142,205,255,0.08) 0px, transparent 50%),
       linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  }
+
+  .bg-chat-grid {
+    background-color: #fafafa;
+    background-image:
+      linear-gradient(rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+      radial-gradient(at 20% 20%, rgba(26, 110, 245, 0.08) 0px, transparent 45%),
+      radial-gradient(at 80% 10%, rgba(5, 200, 172, 0.06) 0px, transparent 45%),
+      linear-gradient(180deg, #fcfcfd 0%, #f3f6fb 100%);
+    background-size: 28px 28px, 28px 28px, auto, auto, auto;
+    background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+  }
+
+  .dark .bg-chat-grid {
+    background-color: #0a0a0a;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+      radial-gradient(at 20% 20%, rgba(26, 110, 245, 0.12) 0px, transparent 45%),
+      radial-gradient(at 80% 10%, rgba(5, 200, 172, 0.1) 0px, transparent 45%),
+      linear-gradient(180deg, #0a0a0a 0%, #111827 100%);
+    background-size: 28px 28px, 28px 28px, auto, auto, auto;
+    background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
   }
 
   /* Auth page gradient */
