@@ -20,8 +20,8 @@ import {
 
 export const AiInput = ({
   messages = [],
-  onSendMessage = () => {},
-  models = DEFAULT_MODELS,
+  onSendMessage = () => { },
+  models = [],
   backgroundText = "Skiper Input 001",
   placeholder = "Ask anything...",
 }) => {
@@ -80,15 +80,13 @@ const MessageList = ({
               key={msg.id}
               initial={{ opacity: 0, y: 10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              className={`flex ${
-                msg.sender === "user" ? "justify-end" : "justify-start"
-              }`}>
+              className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"
+                }`}>
               <div
-                className={`max-w-[85%] rounded-2xl border px-3 py-2 text-sm font-medium shadow-sm sm:max-w-[80%] sm:px-4 sm:text-[15px] ${
-                  msg.sender === "user"
+                className={`max-w-[85%] rounded-2xl border px-3 py-2 text-sm font-medium shadow-sm sm:max-w-[80%] sm:px-4 sm:text-[15px] ${msg.sender === "user"
                     ? "rounded-tr-none border-neutral-900 bg-neutral-900 text-white dark:border-neutral-700 dark:bg-neutral-800"
                     : "rounded-tl-none border-neutral-200 bg-white text-neutral-800 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200"
-                }`}>
+                  }`}>
                 {msg.text}
               </div>
             </motion.div>
@@ -241,9 +239,8 @@ export const ChatInput = ({
     <motion.div
       layout
       transition={{ type: "spring", stiffness: 200, damping: 25 }}
-      className={`z-20 flex w-full justify-center px-3 py-4 sm:px-4 ${
-        !hasMessages ? "flex-1 items-center" : "items-end"
-      }`}>
+      className={`z-20 flex w-full justify-center px-3 py-3 sm:px-4 sm:py-4 ${!hasMessages ? "flex-1 items-center" : "items-end"
+        }`}>
       <motion.div
         layout
         className="glass-liquid-strong w-full max-w-5xl rounded-2xl border border-white/50 p-3 shadow-lg sm:rounded-[24px]">
@@ -276,7 +273,7 @@ export const ChatInput = ({
             }
           }}
           placeholder={placeholder}
-          className="mb-2 max-h-[180px] min-h-[40px] w-full resize-none bg-transparent px-1 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-500 sm:max-h-[200px] sm:min-h-[44px] sm:px-2 sm:text-base"
+          className="mb-2 max-h-[160px] min-h-[40px] w-full resize-none bg-transparent px-1 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-500 sm:max-h-[200px] sm:min-h-[44px] sm:px-2 sm:text-base"
           rows={1} />
 
         {/* Attachment previews */}
@@ -318,16 +315,15 @@ export const ChatInput = ({
               type="button"
               onClick={handleMicClick}
               disabled={!onTranscribe || isTranscribing}
-              className={`rounded-lg border p-2 transition-colors sm:p-2.5 ${
-                isRecording
+              className={`shrink-0 rounded-lg border p-2 transition-colors sm:p-2.5 ${isRecording
                   ? "border-red-300 bg-red-50 text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"
                   : "border-neutral-200 bg-neutral-100 text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400"
-              } ${(!onTranscribe || isTranscribing) ? "cursor-not-allowed opacity-60" : ""}`}
+                } ${(!onTranscribe || isTranscribing) ? "cursor-not-allowed opacity-60" : ""}`}
               title={isRecording ? "Stop recording" : "Record voice message"}>
               {isRecording ? <Square className="h-4 w-4 sm:h-5 sm:w-5" /> : <Mic className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
             {(isRecording || isTranscribing) && (
-              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              <span className="truncate text-[11px] font-medium text-neutral-500 dark:text-neutral-400 sm:text-xs">
                 {isRecording ? "Recording..." : "Transcribing..."}
               </span>
             )}
@@ -336,11 +332,10 @@ export const ChatInput = ({
           <button
             onClick={handleSend}
             disabled={!inputValue.trim() && attachments.length === 0}
-            className={`rounded-lg p-2 transition-colors sm:p-3 ${
-              inputValue.trim() || attachments.length > 0
+            className={`rounded-lg p-2 transition-colors sm:p-3 ${inputValue.trim() || attachments.length > 0
                 ? "glass-liquid-accent text-neutral-950"
                 : "cursor-not-allowed border border-white/30 bg-white/30 text-neutral-400 dark:bg-white/5 dark:text-neutral-500"
-            }`}>
+              }`}>
             <Send className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>
         </div>
@@ -354,7 +349,7 @@ const AttachmentMenu = ({ onImageClick, onDocClick }) => (
     <DropdownMenuTrigger
       render={<button
         className="group rounded-lg border border-neutral-200 bg-neutral-100 p-2 text-neutral-500 sm:p-2.5 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400" />}><Plus
-      className="h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-45 sm:h-5 sm:w-5" /></DropdownMenuTrigger>
+        className="h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-45 sm:h-5 sm:w-5" /></DropdownMenuTrigger>
 
     <DropdownMenuContent
       align="start"
