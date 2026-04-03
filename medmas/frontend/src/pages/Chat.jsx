@@ -135,6 +135,7 @@ export default function Chat() {
   const [district, setDistrict]           = useState("");
   const [districts, setDistricts]         = useState(["Vadodara","Surat","Rajkot","Bharuch","Ahmedabad","Mumbai","Delhi"]);
   const [locationStatus, setLocationStatus] = useState("detecting");
+  const [locationHint, setLocationHint]   = useState("");
   const [userCoords, setUserCoords]       = useState(null); // {lat, lng}
   const [tab, setTab]                     = useState("chat");
   const bottomRef                         = useRef(null);
@@ -163,9 +164,22 @@ export default function Chat() {
   // Auto-detect location on mount
   useEffect(() => {
     const fallback = user?.district || "Vadodara";
+    const needsSecureContext =
+      !window.isSecureContext &&
+      window.location.hostname !== "localhost" &&
+      window.location.hostname !== "127.0.0.1";
+
+    if (needsSecureContext) {
+      setDistrict(fallback);
+      setLocationStatus("manual");
+      setLocationHint("Live location needs HTTPS. For local testing, set VITE_DEV_HTTPS=true.");
+      return;
+    }
+
     if (!navigator.geolocation) {
       setDistrict(fallback);
-      setLocationStatus("done");
+      setLocationStatus("manual");
+      setLocationHint("This browser does not support geolocation.");
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -179,13 +193,26 @@ export default function Chat() {
             body: JSON.stringify(coords),
           });
           const data = await res.json();
-          setDistrict(res.ok && data.district ? data.district : fallback);
+          if (res.ok && data.district) {
+            setDistrict(data.district);
+            setLocationStatus("live");
+            setLocationHint("");
+          } else {
+            setDistrict(fallback);
+            setLocationStatus("manual");
+            setLocationHint("Could not match your live location. Using manual district selection.");
+          }
         } catch {
           setDistrict(fallback);
+          setLocationStatus("manual");
+          setLocationHint("Could not resolve your live location. Using manual district selection.");
         }
-        setLocationStatus("done");
       },
-      () => { setDistrict(fallback); setLocationStatus("denied"); },
+      () => {
+        setDistrict(fallback);
+        setLocationStatus("manual");
+        setLocationHint("Location permission denied. Using manual district selection.");
+      },
       { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
     );
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -247,6 +274,22 @@ export default function Chat() {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
     } finally { setLoading(false); }
+  }
+
+  async function transcribeAudio(blob) {
+    const extension = blob.type.includes("mp4") ? "m4a" : blob.type.includes("mpeg") ? "mp3" : blob.type.includes("wav") ? "wav" : "webm";
+    const formData = new FormData();
+    formData.append("file", blob, `voice-message.${extension}`);
+
+    const res = await fetch(`${API_BASE}/api/transcribe`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok || data.detail) {
+      throw new Error(data.detail || "Speech transcription failed.");
+    }
+    return data.text || "";
   }
 
   function handleSend(text) {
@@ -553,6 +596,7 @@ export default function Chat() {
         hasMessages={hasMessages}
         placeholder={tab === "asha" ? "Patient observations... (any language)" : "Describe symptoms in any language..."}
         onSend={handleSend}
+        onTranscribe={transcribeAudio}
       />
 
       {/* ── Footer info ─────────────────────────────────────── */}
@@ -567,6 +611,13 @@ export default function Chat() {
           </p>
         </div>
       </div>
+      {locationHint && (
+        <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+          <div className="mx-auto max-w-4xl">
+            {locationHint}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

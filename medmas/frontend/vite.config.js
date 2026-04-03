@@ -1,16 +1,25 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import basicSsl from '@vitejs/plugin-basic-ssl';
 import path from 'path';
 
-export default defineConfig({
-  plugins: [react(), basicSsl()],
-  server: {
-    https: true,
-  },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
+export default defineConfig(async ({ mode }) => {
+  const enableHttps = process.env.VITE_DEV_HTTPS === 'true';
+  const plugins = [react()];
+
+  if (enableHttps) {
+    const { default: basicSsl } = await import('@vitejs/plugin-basic-ssl');
+    plugins.push(basicSsl());
+  }
+
+  return {
+    plugins,
+    server: {
+      https: enableHttps,
     },
-  },
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
+  };
 });

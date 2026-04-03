@@ -3,39 +3,19 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Plus,
-  Globe,
-  ChevronDown,
   Send,
   Image as ImageIcon,
   FileText,
   Layers,
-  Sparkles,
-  Cpu,
-  Zap,
+  Mic,
+  Square,
 } from "lucide-react";
-import { LuBrain } from "react-icons/lu";
-import { PiLightbulbFilament } from "react-icons/pi";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const DEFAULT_MODELS = [
-  {
-    id: "gpt-4o",
-    name: "GPT-4o",
-    icon: <PiLightbulbFilament className="h-4 w-4" />,
-  },
-  {
-    id: "claude-3-5",
-    name: "Claude 3.5 Sonnet",
-    icon: <Sparkles className="h-4 w-4" />,
-  },
-  { id: "gemini-pro", name: "Gemini Pro", icon: <Cpu className="h-4 w-4" /> },
-  { id: "llama-3-1", name: "Llama 3.1", icon: <Zap className="h-4 w-4" /> },
-];
 
 export const AiInput = ({
   messages = [],
@@ -122,14 +102,17 @@ export const ChatInput = ({
   models,
   hasMessages,
   placeholder,
-  onSend
+  onSend,
+  onTranscribe,
 }) => {
   const [inputValue, setInputValue] = useState("");
-  const [selectedModel, setSelectedModel] = useState(models[0]);
-  const [isSearchActive, setIsSearchActive] = useState(false);
-  const [isDeepMindActive, setIsDeepMindActive] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
 
   const textAreaRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const mediaStreamRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   useEffect(() => {
     if (textAreaRef.current) {
@@ -140,8 +123,95 @@ export const ChatInput = ({
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
-    onSend(inputValue, selectedModel.id);
+    onSend(inputValue);
     setInputValue("");
+  };
+
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  const stopMediaStream = () => {
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+  };
+
+  const startRecording = async () => {
+    if (!onTranscribe) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      window.alert("Audio recording is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        setIsRecording(false);
+        const blobType = recorder.mimeType || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type: blobType });
+        audioChunksRef.current = [];
+        stopMediaStream();
+
+        if (!blob.size) {
+          return;
+        }
+
+        setIsTranscribing(true);
+        try {
+          const text = await onTranscribe(blob);
+          if (text) {
+            setInputValue((prev) => (prev ? `${prev} ${text}`.trim() : text));
+          }
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      stopMediaStream();
+      setIsRecording(false);
+      window.alert(error?.message || "Could not start audio recording.");
+    }
+  };
+
+  const stopRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+  };
+
+  const handleMicClick = () => {
+    if (isTranscribing) {
+      return;
+    }
+    if (isRecording) {
+      stopRecording();
+      return;
+    }
+    void startRecording();
   };
 
   return (
@@ -172,6 +242,23 @@ export const ChatInput = ({
           className="glass-liquid mt-2 flex items-center justify-between gap-2 rounded-xl border border-white/40 p-2">
           <div className="no-scrollbar flex items-center gap-1 overflow-x-auto sm:gap-2">
             <AttachmentMenu />
+            <button
+              type="button"
+              onClick={handleMicClick}
+              disabled={!onTranscribe || isTranscribing}
+              className={`rounded-lg border p-2 transition-colors sm:p-2.5 ${
+                isRecording
+                  ? "border-red-300 bg-red-50 text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"
+                  : "border-neutral-200 bg-neutral-100 text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400"
+              } ${(!onTranscribe || isTranscribing) ? "cursor-not-allowed opacity-60" : ""}`}
+              title={isRecording ? "Stop recording" : "Record voice message"}>
+              {isRecording ? <Square className="h-4 w-4 sm:h-5 sm:w-5" /> : <Mic className="h-4 w-4 sm:h-5 sm:w-5" />}
+            </button>
+            {(isRecording || isTranscribing) && (
+              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                {isRecording ? "Recording..." : "Transcribing..."}
+              </span>
+            )}
           </div>
 
           <button
@@ -219,29 +306,3 @@ const AttachmentMenu = () => (
   </DropdownMenu>
 );
 
-const ModelSelector = ({
-  models,
-  selectedModel,
-  onSelect
-}) => (
-  <DropdownMenu>
-    <DropdownMenuTrigger
-      render={<button
-        className="flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-100 p-2 text-sm text-neutral-700 sm:p-2.5 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200" />}>{selectedModel.icon}<span className="hidden md:inline">{selectedModel.name}</span><ChevronDown className="h-3 w-3" /></DropdownMenuTrigger>
-
-    <DropdownMenuContent
-      align="start"
-      side="bottom"
-      className="mt-5.5 w-48 rounded-xl border border-neutral-200 bg-white sm:w-52 dark:border-neutral-800 dark:bg-neutral-900">
-      {models.map((model) => (
-        <DropdownMenuItem
-          key={model.id}
-          onClick={() => onSelect(model)}
-          className="flex items-center gap-2 p-2 text-sm text-neutral-700 dark:text-neutral-200">
-          {model.icon}
-          {model.name}
-        </DropdownMenuItem>
-      ))}
-    </DropdownMenuContent>
-  </DropdownMenu>
-);

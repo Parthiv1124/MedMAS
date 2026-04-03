@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from openai import OpenAI
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 # Project root = parent of backend/
@@ -22,6 +23,7 @@ SUPABASE_URL       = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY  = os.getenv("SUPABASE_ANON_KEY")
 MODEL_NAME         = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3.1-8B-Instruct")
 EMBEDDING_MODEL    = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+SPEECH_TO_TEXT_MODEL = os.getenv("SPEECH_TO_TEXT_MODEL", "openai/whisper-large-v3")
 
 # Resolve all paths relative to project root
 DOCTORS_CSV_PATH   = str(PROJECT_ROOT / os.getenv("DOCTORS_CSV_PATH", "data/doctors.csv"))
@@ -66,8 +68,16 @@ def create_embeddings() -> OpenAIEmbeddings:
     )
 
 
+def create_openai_client() -> OpenAI:
+    return OpenAI(
+        api_key=DEEPINFRA_API_KEY,
+        base_url=DEEPINFRA_BASE_URL,
+    )
+
+
 # Singleton LLM shared across all agents via DeepInfra's OpenAI-compatible API.
 llm = create_llm()
+openai_client = create_openai_client()
 
 # Singleton Supabase client — graceful fallback if credentials are placeholders
 supabase = None

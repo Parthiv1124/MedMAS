@@ -18,7 +18,13 @@ from services.asha_service import (
     save_field_assessment, update_patient_status,
     get_assessment_history,
 )
-from config import supabase, GOOGLE_MAPS_API_KEY, DOCTORS_CSV_PATH
+from config import (
+    supabase,
+    GOOGLE_MAPS_API_KEY,
+    DOCTORS_CSV_PATH,
+    SPEECH_TO_TEXT_MODEL,
+    openai_client,
+)
 from services.osm_doctor_finder import find_nearby_doctors
 from services.notifications import send_sms
 import httpx
@@ -58,6 +64,11 @@ class ChatResponse(BaseModel):
     doctor_list:       list = []
     health_score:      Optional[int] = None
     crisis_detected:   bool = False
+
+
+class TranscriptionResponse(BaseModel):
+    text: str
+    model: str
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
 @app.get("/health")
@@ -144,6 +155,53 @@ async def upload_lab(
         "triage_level":   result.get("triage_level", "routine"),
         "doctor_list":    result.get("doctor_list") or [],
     }
+
+
+@app.post("/api/transcribe", response_model=TranscriptionResponse)
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe recorded audio using DeepInfra's OpenAI-compatible STT API."""
+    if not file.filename:
+        raise HTTPException(400, "Audio file is required.")
+
+    content_type = (file.content_type or "").lower()
+    allowed_prefixes = (
+        "audio/webm",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/x-m4a",
+        "audio/mp4a-latm",
+        "audio/ogg",
+    )
+    if content_type and not any(content_type.startswith(prefix) for prefix in allowed_prefixes):
+        raise HTTPException(400, f"Unsupported audio type: {content_type}")
+
+    audio_bytes = await file.read()
+    print(
+        f"[Transcribe] filename={file.filename!r} content_type={content_type!r} bytes={len(audio_bytes)}"
+    )
+    if not audio_bytes:
+        raise HTTPException(400, "Uploaded audio is empty.")
+
+    try:
+        transcription = openai_client.audio.transcriptions.create(
+            model=SPEECH_TO_TEXT_MODEL,
+            file=(file.filename, audio_bytes, file.content_type or "application/octet-stream"),
+        )
+    except AuthenticationError:
+        raise HTTPException(
+            status_code=401,
+            detail="DeepInfra authentication failed. Check DEEPINFRA_API_KEY and speech model configuration.",
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Speech transcription failed: {e}")
+
+    text = (getattr(transcription, "text", "") or "").strip()
+    if not text:
+        raise HTTPException(502, "Speech transcription returned empty text.")
+
+    return TranscriptionResponse(text=text, model=SPEECH_TO_TEXT_MODEL)
 
 @app.get("/api/doctors")
 def get_doctors(specialty: str = "General", district: str = ""):
