@@ -21,6 +21,20 @@ DOCTOR_REFERRAL_FOOTER = (
     "In an emergency, call 112."
 )
 
+# ── Context helper ─────────────────────────────────────────────────────────
+def _format_history(session_history: list, max_turns: int = 6) -> str:
+    """Format the last N turn-pairs from session_history into a readable block."""
+    if not session_history:
+        return ""
+    recent = session_history[-(max_turns * 2):]
+    lines = []
+    for turn in recent:
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        content = turn.get("content", "").strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
 # ── Intent Classifier ──────────────────────────────────────────────────────
 INTENT_PROMPT = """Classify this query into exactly one category.
 
@@ -50,9 +64,14 @@ def intent_classifier_node(state: MedMASState) -> dict:
     if state.get("asha_mode") and state.get("intent") == "asha":
         return {"intent": "asha", "agents_to_run": ["asha_copilot"]}
 
+    history_text = _format_history(state.get("session_history", []))
+    query = state["translated_input"]
+    if history_text:
+        query = f"Conversation so far:\n{history_text}\n\nLatest query: {query}"
+
     prompt  = ChatPromptTemplate.from_template(INTENT_PROMPT)
     chain   = prompt | llm | StrOutputParser()
-    intent  = chain.invoke({"query": state["translated_input"]}).strip().lower()
+    intent  = chain.invoke({"query": query}).strip().lower()
 
     agent_map = {
         "symptom":   ["symptom_checker"],
@@ -97,10 +116,14 @@ Respond in the same language the user used if possible."""
 
 def offtopic_responder_node(state: MedMASState) -> dict:
     """Handles non-medical queries with a friendly redirect."""
+    history_text = _format_history(state.get("session_history", []))
+    query = state["translated_input"]
+    if history_text:
+        query = f"Conversation so far:\n{history_text}\n\nLatest message: {query}"
     prompt = ChatPromptTemplate.from_template(OFFTOPIC_PROMPT)
     chain  = prompt | llm | StrOutputParser()
     try:
-        response = chain.invoke({"query": state["translated_input"]})
+        response = chain.invoke({"query": query})
     except Exception:
         response = (
             "Hello! I'm MedMAS, your AI health assistant for rural India. "
@@ -377,17 +400,18 @@ medmas_graph = build_graph()
 
 
 async def run_pipeline(
-    raw_input:      str,
-    media_type:     str   = "text",
-    pdf_bytes:      bytes = None,
-    user_id:        str   = None,
-    user_district:  str   = None,
-    user_phone:     str   = None,
-    user_lat:       float = None,
-    user_lng:       float = None,
-    asha_mode:      bool  = False,
-    asha_worker_id: str   = None,
-    patient_id:     str   = None,
+    raw_input:       str,
+    media_type:      str   = "text",
+    pdf_bytes:       bytes = None,
+    user_id:         str   = None,
+    user_district:   str   = None,
+    user_phone:      str   = None,
+    user_lat:        float = None,
+    user_lng:        float = None,
+    asha_mode:       bool  = False,
+    asha_worker_id:  str   = None,
+    patient_id:      str   = None,
+    session_history: list  = None,
 ) -> MedMASState:
     state = initial_state(
         raw_input=raw_input,
@@ -401,5 +425,6 @@ async def run_pipeline(
         asha_mode=asha_mode,
         asha_worker_id=asha_worker_id,
         patient_id=patient_id,
+        session_history=session_history or [],
     )
     return await medmas_graph.ainvoke(state)

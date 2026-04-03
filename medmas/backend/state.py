@@ -50,17 +50,18 @@ class MedMASState(TypedDict):
 
 
 def initial_state(
-    raw_input:     str,
-    media_type:    str           = "text",
-    pdf_bytes:     bytes         = None,
-    user_id:       str           = None,
-    user_district: str           = None,
-    user_phone:    str           = None,
-    user_lat:      float         = None,
-    user_lng:      float         = None,
-    asha_mode:     bool          = False,
-    asha_worker_id: str          = None,
-    patient_id:    str           = None,
+    raw_input:      str,
+    media_type:     str           = "text",
+    pdf_bytes:      bytes         = None,
+    user_id:        str           = None,
+    user_district:  str           = None,
+    user_phone:     str           = None,
+    user_lat:       float         = None,
+    user_lng:       float         = None,
+    asha_mode:      bool          = False,
+    asha_worker_id: str           = None,
+    patient_id:     str           = None,
+    session_history: list         = None,
 ) -> MedMASState:
     """Create a fresh MedMASState for a new request."""
     return MedMASState(
@@ -80,7 +81,7 @@ def initial_state(
         agents_to_run=[],
         routing_confidence=0.0,
         session_context={},
-        session_history=[],
+        session_history=session_history or [],
         symptom_result=None,
         disease_result=None,
         empathy_result=None,

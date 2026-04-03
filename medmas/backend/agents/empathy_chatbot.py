@@ -66,10 +66,15 @@ def empathy_chatbot_node(state: MedMASState) -> dict:
             "Do not ask further questions until you have provided resources."
         )
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT + urgency_note),
-        ("human", "The user says: {message}\nSeverity detected: {severity}")
-    ])
+    # Build messages list — prepend history turns if available
+    history = state.get("session_history") or []
+    messages = [("system", SYSTEM_PROMPT + urgency_note)]
+    for turn in history[-(10):]:
+        role = "human" if turn.get("role") == "user" else "ai"
+        messages.append((role, turn.get("content", "")))
+    messages.append(("human", "The user says: {message}\nSeverity detected: {severity}"))
+
+    prompt = ChatPromptTemplate.from_messages(messages)
     chain = prompt | llm | StrOutputParser()
 
     try:
