@@ -67,9 +67,23 @@ def asha_copilot_node(state: MedMASState) -> dict:
         if ctx.get("combined_diabetes_alert"):
             prior_context += "\nCombined diabetes + stress alert already detected."
 
+    # Build history string from prior ASHA turns in this session
+    history = state.get("session_history") or []
+    history_text = ""
+    if history:
+        lines = []
+        for turn in history[-(8):]:
+            role = "ASHA worker" if turn.get("role") == "user" else "MedMAS"
+            lines.append(f"{role}: {turn.get('content', '')}")
+        history_text = "\n".join(lines)
+
+    human_content = "Patient field observations: {observations}\n\nPrior assessments from MedMAS:{context}"
+    if history_text:
+        human_content = f"Previous session turns:\n{history_text}\n\n" + human_content
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
-        ("human", "Patient field observations: {observations}\n\nPrior assessments from MedMAS:{context}")
+        ("human", human_content)
     ])
     chain = prompt | llm | JsonOutputParser()
 

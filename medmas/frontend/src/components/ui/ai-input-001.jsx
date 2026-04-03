@@ -1,5 +1,5 @@
 "use client";;
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Plus,
@@ -9,6 +9,7 @@ import {
   Layers,
   Mic,
   Square,
+  X,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -108,11 +109,14 @@ export const ChatInput = ({
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [attachments, setAttachments] = useState([]);
 
   const textAreaRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const imageInputRef = useRef(null);
+  const docInputRef = useRef(null);
 
   useEffect(() => {
     if (textAreaRef.current) {
@@ -122,10 +126,29 @@ export const ChatInput = ({
   }, [inputValue]);
 
   const handleSend = () => {
-    if (!inputValue.trim()) return;
-    onSend(inputValue);
+    if (!inputValue.trim() && attachments.length === 0) return;
+    onSend(inputValue, attachments.map((a) => a.file));
     setInputValue("");
+    setAttachments([]);
   };
+
+  const handleFiles = useCallback((files, type) => {
+    const newAttachments = Array.from(files).map((file) => ({
+      id: `${Date.now()}-${Math.random()}`,
+      file,
+      type,
+      preview: type === "image" ? URL.createObjectURL(file) : null,
+    }));
+    setAttachments((prev) => [...prev, ...newAttachments]);
+  }, []);
+
+  const removeAttachment = useCallback((id) => {
+    setAttachments((prev) => {
+      const removed = prev.find((a) => a.id === id);
+      if (removed?.preview) URL.revokeObjectURL(removed.preview);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -224,6 +247,24 @@ export const ChatInput = ({
       <motion.div
         layout
         className="glass-liquid-strong w-full max-w-5xl rounded-2xl border border-white/50 p-3 shadow-lg sm:rounded-[24px]">
+        {/* Hidden file inputs */}
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => { handleFiles(e.target.files, "image"); e.target.value = ""; }}
+        />
+        <input
+          ref={docInputRef}
+          type="file"
+          accept=".pdf,.doc,.docx,.txt,.csv,.xls,.xlsx"
+          multiple
+          className="hidden"
+          onChange={(e) => { handleFiles(e.target.files, "document"); e.target.value = ""; }}
+        />
+
         <textarea
           ref={textAreaRef}
           value={inputValue}
@@ -238,10 +279,41 @@ export const ChatInput = ({
           className="mb-2 max-h-[180px] min-h-[40px] w-full resize-none bg-transparent px-1 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-500 sm:max-h-[200px] sm:min-h-[44px] sm:px-2 sm:text-base"
           rows={1} />
 
+        {/* Attachment previews */}
+        {attachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2 px-1 sm:px-2">
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                className="group relative flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 p-1.5 pr-7 dark:border-neutral-700 dark:bg-neutral-800">
+                {att.type === "image" ? (
+                  <img src={att.preview} alt="" className="h-10 w-10 rounded-md object-cover" />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-700">
+                    <FileText className="h-5 w-5 text-neutral-500 dark:text-neutral-400" />
+                  </div>
+                )}
+                <span className="max-w-[120px] truncate text-xs font-medium text-neutral-600 dark:text-neutral-300">
+                  {att.file.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(att.id)}
+                  className="absolute right-1 top-1 rounded-full bg-neutral-200 p-0.5 text-neutral-500 opacity-0 transition-opacity hover:bg-neutral-300 group-hover:opacity-100 dark:bg-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-600">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div
           className="glass-liquid mt-2 flex items-center justify-between gap-2 rounded-xl border border-white/40 p-2">
           <div className="no-scrollbar flex items-center gap-1 overflow-x-auto sm:gap-2">
-            <AttachmentMenu />
+            <AttachmentMenu
+              onImageClick={() => imageInputRef.current?.click()}
+              onDocClick={() => docInputRef.current?.click()}
+            />
             <button
               type="button"
               onClick={handleMicClick}
@@ -263,9 +335,9 @@ export const ChatInput = ({
 
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() && attachments.length === 0}
             className={`rounded-lg p-2 transition-colors sm:p-3 ${
-              inputValue.trim()
+              inputValue.trim() || attachments.length > 0
                 ? "glass-liquid-accent text-neutral-950"
                 : "cursor-not-allowed border border-white/30 bg-white/30 text-neutral-400 dark:bg-white/5 dark:text-neutral-500"
             }`}>
@@ -277,13 +349,7 @@ export const ChatInput = ({
   );
 };
 
-const ATTACHMENT_ITEMS = [
-  { label: "Images", icon: ImageIcon },
-  { label: "Documents", icon: FileText },
-  { label: "Connect Apps", icon: Layers },
-];
-
-const AttachmentMenu = () => (
+const AttachmentMenu = ({ onImageClick, onDocClick }) => (
   <DropdownMenu>
     <DropdownMenuTrigger
       render={<button
@@ -294,14 +360,18 @@ const AttachmentMenu = () => (
       align="start"
       side="bottom"
       className="mt-5.5 w-44 rounded-xl border border-neutral-200 bg-white p-2 sm:w-48 dark:border-neutral-800 dark:bg-neutral-900">
-      {ATTACHMENT_ITEMS.map(({ label, icon: Icon }) => (
-        <DropdownMenuItem
-          key={label}
-          className="flex items-center gap-2 p-2 text-sm text-neutral-700 dark:text-neutral-200">
-          <Icon className="h-4 w-4 shrink-0" />
-          {label}
-        </DropdownMenuItem>
-      ))}
+      <DropdownMenuItem
+        onClick={onImageClick}
+        className="flex cursor-pointer items-center gap-2 p-2 text-sm text-neutral-700 dark:text-neutral-200">
+        <ImageIcon className="h-4 w-4 shrink-0" />
+        Images
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={onDocClick}
+        className="flex cursor-pointer items-center gap-2 p-2 text-sm text-neutral-700 dark:text-neutral-200">
+        <FileText className="h-4 w-4 shrink-0" />
+        Documents
+      </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
 );

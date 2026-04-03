@@ -361,10 +361,21 @@ def symptom_checker_node(state: MedMASState) -> dict:
     """LangGraph node: structured symptom triage via extraction, RAG, and synthesis."""
     symptoms = state["translated_input"]
 
-    structured = _structure_symptoms(symptoms)
-    red_flags = _detect_red_flags(symptoms, structured)
-    context = _retrieve_context(symptoms, structured)
-    differentials = _reason_differentials(symptoms, structured, context)
+    # Prepend prior symptom turns so the LLM understands follow-up context
+    history = state.get("session_history") or []
+    if history:
+        prior = "\n".join(
+            f"{'User' if t.get('role') == 'user' else 'Assistant'}: {t.get('content', '')}"
+            for t in history[-(8):]
+        )
+        enriched = f"Previous conversation:\n{prior}\n\nCurrent message: {symptoms}"
+    else:
+        enriched = symptoms
+
+    structured = _structure_symptoms(enriched)
+    red_flags = _detect_red_flags(enriched, structured)
+    context = _retrieve_context(enriched, structured)
+    differentials = _reason_differentials(enriched, structured, context)
     triage = _synthesize_triage(structured, red_flags, differentials)
 
     result = {

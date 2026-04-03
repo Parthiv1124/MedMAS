@@ -2,7 +2,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import json
 import uvicorn
 import os
@@ -55,6 +55,7 @@ class ChatRequest(BaseModel):
     user_phone:    Optional[str] = None
     user_lat:      Optional[float] = None
     user_lng:      Optional[float] = None
+    chat_history:  List[dict] = []
 
 class ChatResponse(BaseModel):
     response:          str
@@ -87,6 +88,7 @@ async def chat(req: ChatRequest):
             user_phone=req.user_phone,
             user_lat=req.user_lat,
             user_lng=req.user_lng,
+            session_history=req.chat_history,
         )
     except AuthenticationError:
         raise HTTPException(
@@ -112,6 +114,78 @@ async def chat(req: ChatRequest):
             }).execute()
     except Exception:
         pass  # Non-blocking
+
+    health_score = None
+    if result.get("health_result"):
+        health_score = result["health_result"].get("total_score")
+
+    return ChatResponse(
+        response=result.get("final_response", ""),
+        original_language=result.get("input_lang", "en"),
+        triage_level=result.get("triage_level", "routine"),
+        intent=result.get("intent", ""),
+        doctor_list=result.get("doctor_list") or [],
+        health_score=health_score,
+        crisis_detected=result.get("crisis_detected", False),
+        symptom_result=result.get("symptom_result"),
+    )
+
+@app.post("/api/chat/upload")
+async def chat_upload(
+    files:         List[UploadFile] = File(...),
+    message:       str              = Form(""),
+    user_id:       str              = Form(None),
+    user_district: str              = Form(None),
+    user_phone:    str              = Form(None),
+    user_lat:      float            = Form(None),
+    user_lng:      float            = Form(None),
+):
+    """Chat endpoint that accepts file attachments (images + documents)."""
+    from services.image_parser import extract_text_from_image
+
+    extracted_parts = []
+    pdf_bytes_combined = None
+
+    for f in files:
+        content = await f.read()
+        ctype = f.content_type or ""
+
+        if ctype.startswith("image/"):
+            # Use vision model to extract text/findings from the image
+            extracted = extract_text_from_image(content, ctype)
+            extracted_parts.append(f"[Extracted from image '{f.filename}']:\n{extracted}")
+        elif ctype == "application/pdf" or (f.filename and f.filename.endswith(".pdf")):
+            pdf_bytes_combined = content
+        else:
+            # Text-based documents: extract content as text
+            try:
+                text_content = content.decode("utf-8", errors="replace")
+                extracted_parts.append(f"[Content of '{f.filename}']:\n{text_content[:5000]}")
+            except Exception:
+                extracted_parts.append(f"[Attached document: {f.filename} — could not read contents]")
+
+    # Build enriched message with extracted content
+    enriched = message or ""
+    if extracted_parts:
+        enriched = enriched + "\n\n" + "\n\n".join(extracted_parts)
+
+    media_type = "pdf" if pdf_bytes_combined else "text"
+
+    try:
+        result = await run_pipeline(
+            raw_input=enriched or "User uploaded files for analysis",
+            media_type=media_type,
+            pdf_bytes=pdf_bytes_combined,
+            user_id=user_id,
+            user_district=user_district,
+            user_phone=user_phone,
+            user_lat=user_lat,
+            user_lng=user_lng,
+        )
+    except AuthenticationError:
+        raise HTTPException(401, "DeepInfra authentication failed.")
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
     health_score = None
     if result.get("health_result"):
@@ -483,6 +557,7 @@ class ASHAAssessRequest(BaseModel):
     user_district:  Optional[str] = None
     user_lat:       Optional[float] = None
     user_lng:       Optional[float] = None
+    chat_history:   List[dict] = []
 
 class AddPatientRequest(BaseModel):
     asha_worker_id: str
@@ -530,6 +605,7 @@ async def asha_assess(req: ASHAAssessRequest):
         user_district=req.user_district,
         user_lat=req.user_lat,
         user_lng=req.user_lng,
+        session_history=req.chat_history,
     )
     state["asha_mode"]       = True
     state["asha_worker_id"]  = req.asha_worker_id

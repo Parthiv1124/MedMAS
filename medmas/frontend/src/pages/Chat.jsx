@@ -1,11 +1,48 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { ChatInput } from "@/components/ui/ai-input-001";
-import { Sparkles, Cpu, Zap } from "lucide-react";
+import ChatSidebar from "@/components/ui/ChatSidebar";
+import { Sparkles, Cpu, Zap, PanelLeft } from "lucide-react";
 import { LuBrain } from "react-icons/lu";
 import { PiLightbulbFilament } from "react-icons/pi";
 import logo from "../assets/logo.png";
+
+// ── Session localStorage helpers ────────────────────────────────────────────
+const SESSIONS_KEY = "medmas_sessions";
+const msgKey = (id) => `medmas_session_${id}`;
+
+function readSessions() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
+    // Always return sorted most-recent-first
+    return raw.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  } catch { return []; }
+}
+function writeSessions(arr) {
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(arr));
+}
+function readMessages(sessionId) {
+  try { return JSON.parse(localStorage.getItem(msgKey(sessionId)) || "[]"); }
+  catch { return []; }
+}
+function appendMessages(sessionId, newMsgs) {
+  // Blob URLs expire — strip before persisting
+  const safe = newMsgs.map((m) => ({
+    ...m,
+    files: m.files?.map((f) => ({ ...f, url: null })) ?? undefined,
+  }));
+  const existing = readMessages(sessionId);
+  localStorage.setItem(msgKey(sessionId), JSON.stringify([...existing, ...safe]));
+}
+function makeSessionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+function makeTitle(text) {
+  return (text || "New Chat").trim().slice(0, 52) || "New Chat";
+}
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -146,6 +183,53 @@ export default function Chat() {
   const [tab, setTab]                     = useState("chat");
   const bottomRef                         = useRef(null);
 
+  // ── Sidebar / session state ────────────────────────────────────────────────
+  const [sidebarOpen, setSidebarOpen]         = useState(true);
+  const [sessions, setSessions]               = useState(() => readSessions());
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const currentSessionRef                     = useRef(null); // mirror for async closures
+
+  // ── Session helpers ────────────────────────────────────────────────────────
+  const persistExchange = useCallback((sessionId, userMsg, assistantMsg) => {
+    // Append only the NEW pair — avoids re-reading stale data or double-writing
+    appendMessages(sessionId, [userMsg, assistantMsg]);
+    setSessions((prev) => {
+      const now = new Date().toISOString();
+      const updated = prev
+        .map((s) => (s.id === sessionId ? { ...s, updatedAt: now } : s))
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); // keep most-recent first
+      writeSessions(updated);
+      return updated;
+    });
+  }, []);
+
+  function newChat() {
+    currentSessionRef.current = null;
+    setCurrentSessionId(null);
+    setMessages([]);
+  }
+
+  function selectSession(id) {
+    if (id === currentSessionRef.current) return;
+    currentSessionRef.current = id;
+    setCurrentSessionId(id);
+    setMessages(readMessages(id));
+  }
+
+  function deleteSession(id) {
+    localStorage.removeItem(msgKey(id));
+    setSessions((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      writeSessions(updated);
+      return updated;
+    });
+    if (currentSessionRef.current === id) {
+      currentSessionRef.current = null;
+      setCurrentSessionId(null);
+      setMessages([]);
+    }
+  }
+
   const storedUser = localStorage.getItem("medmas_user");
   const user = storedUser ? JSON.parse(storedUser) : null;
 
@@ -223,30 +307,98 @@ export default function Chat() {
     );
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function sendMessage(text) {
-    setMessages(prev => [...prev, { id: Date.now(), role: "user", text }]);
+  function buildChatHistory(currentMessages, limit = 20) {
+    // Send the last `limit` messages as context — backend agents further slice internally
+    return currentMessages
+      .filter(m => m.text?.trim())
+      .slice(-limit)
+      .map(m => ({ role: m.role, content: m.text }));
+  }
+
+  async function sendMessage(text, files = []) {
+    const filePreviews = files.map((f) => ({
+      name: f.name,
+      type: f.type.startsWith("image/") ? "image" : "document",
+      url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+    }));
+
+    const userMsgId = Date.now();
+    const userMsg = { id: userMsgId, role: "user", text, files: filePreviews };
+
+    // Snapshot history BEFORE adding the new user message
+    setMessages(prev => {
+      const history = buildChatHistory(prev);
+      _doSendMessage(userMsg, files, filePreviews, history);
+      return [...prev, userMsg];
+    });
+  }
+
+  async function _doSendMessage(userMsg, files, filePreviews, chatHistory) {
+    const { text } = userMsg;
+    // ── Ensure we have a session before hitting the API ──────────────────
+    let sessionId = currentSessionRef.current;
+    if (!sessionId) {
+      sessionId = makeSessionId();
+      const newSession = {
+        id: sessionId,
+        title: makeTitle(text),
+        tab,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      currentSessionRef.current = sessionId;
+      setCurrentSessionId(sessionId);
+      setSessions((prev) => {
+        // New session is most recent — put it first, already sorted
+        const updated = [newSession, ...prev];
+        writeSessions(updated);
+        return updated;
+      });
+    }
+
     setLoading(true);
     setActiveAgent("Crisis Guard scanning...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, user_district: district, user_lat: userCoords?.lat, user_lng: userCoords?.lng }),
-      });
+      let res;
+      if (files.length > 0) {
+        const formData = new FormData();
+        formData.append("message", text || "");
+        if (district) formData.append("user_district", district);
+        if (userCoords?.lat) formData.append("user_lat", String(userCoords.lat));
+        if (userCoords?.lng) formData.append("user_lng", String(userCoords.lng));
+        files.forEach((f) => formData.append("files", f));
+        res = await fetch(`${API_BASE}/api/chat/upload`, { method: "POST", body: formData });
+      } else {
+        res = await fetch(`${API_BASE}/api/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: text,
+            user_district: district,
+            user_lat: userCoords?.lat,
+            user_lng: userCoords?.lng,
+            chat_history: chatHistory,
+          }),
+        });
+      }
       const data = await res.json();
       if (data.detail) throw new Error(data.detail);
 
       setActiveAgent(AGENT_INFO[data.intent]?.label || "Processing...");
       setTimeout(() => setActiveAgent(null), 3000);
 
-      setMessages(prev => [...prev, {
+      const assistantMsg = {
         id: Date.now() + 1, role: "assistant", text: data.response,
         triage: data.triage_level, intent: data.intent,
         crisis: data.crisis_detected, doctors: data.doctor_list,
         lang: data.original_language,
         symptomResult: data.symptom_result || null,
-      }]);
+      };
+      setMessages(prev => [...prev, assistantMsg]);
+
+      // Persist exchange — use the same userMsg object that was given to the UI
+      persistExchange(sessionId, userMsg, assistantMsg);
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
@@ -254,7 +406,36 @@ export default function Chat() {
   }
 
   async function sendASHA(text) {
-    setMessages(prev => [...prev, { id: Date.now(), role: "user", text: `[ASHA] ${text}` }]);
+    const userMsg = { id: Date.now(), role: "user", text: `[ASHA] ${text}` };
+
+    // Ensure session exists
+    let sessionId = currentSessionRef.current;
+    if (!sessionId) {
+      sessionId = makeSessionId();
+      const newSession = {
+        id: sessionId,
+        title: makeTitle(text),
+        tab: "asha",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      currentSessionRef.current = sessionId;
+      setCurrentSessionId(sessionId);
+      setSessions((prev) => {
+        const updated = [newSession, ...prev];
+        writeSessions(updated);
+        return updated;
+      });
+    }
+
+    setMessages(prev => {
+      const history = buildChatHistory(prev);
+      _sendASHARequest(text, userMsg, sessionId, history);
+      return [...prev, userMsg];
+    });
+  }
+
+  async function _sendASHARequest(text, userMsg, sessionId, chatHistory) {
     setLoading(true);
     setActiveAgent("ASHA Copilot");
 
@@ -265,18 +446,21 @@ export default function Chat() {
         body: JSON.stringify({
           asha_worker_id: "demo-worker", patient_id: "demo-patient",
           observations: text, user_district: district, user_lat: userCoords?.lat, user_lng: userCoords?.lng,
+          chat_history: chatHistory,
         }),
       });
       const data = await res.json();
       if (data.detail) throw new Error(data.detail);
 
       setTimeout(() => setActiveAgent(null), 3000);
-      setMessages(prev => [...prev, {
+      const assistantMsg = {
         id: Date.now() + 1, role: "assistant", text: data.final_response,
         triage: data.triage_level, intent: "asha",
         crisis: data.crisis_detected, doctors: data.doctor_list,
         asha: data.asha_result,
-      }]);
+      };
+      setMessages(prev => [...prev, assistantMsg]);
+      persistExchange(sessionId, userMsg, assistantMsg);
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
@@ -299,22 +483,45 @@ export default function Chat() {
     return data.text || "";
   }
 
-  function handleSend(text) {
-    if (!text.trim()) return;
-    tab === "asha" ? sendASHA(text) : sendMessage(text);
+  function handleSend(text, files = []) {
+    if (!text.trim() && files.length === 0) return;
+    tab === "asha" ? sendASHA(text) : sendMessage(text, files);
   }
 
   const agentInfo = activeAgent && Object.values(AGENT_INFO).find(a => activeAgent.includes(a.label));
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="relative flex h-screen w-full flex-col overflow-hidden bg-chat-grid">
+    <div className="flex h-screen overflow-hidden">
+
+      {/* ── Sidebar ─────────────────────────────────────────── */}
+      <ChatSidebar
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={selectSession}
+        onNewChat={newChat}
+        onDeleteSession={deleteSession}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen((v) => !v)}
+      />
+
+      {/* ── Main area ───────────────────────────────────────── */}
+      <div className="relative flex flex-1 flex-col overflow-hidden bg-chat-grid">
 
       {/* ── Header ──────────────────────────────────────────── */}
       <header className="glass-liquid sticky top-0 z-30 border-b border-white/35">
         <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-3">
-          {/* Logo */}
+          {/* Sidebar toggle + Logo */}
           <div className="flex items-center gap-3">
+            {!sidebarOpen && (
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                title="Open history"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+            )}
             <img src={logo} alt="MedMAS" className="h-9 w-9 rounded-xl shadow-md" />
             <div className="hidden sm:block">
               <h1 className="text-sm font-bold leading-tight text-neutral-900">MedMAS</h1>
@@ -509,6 +716,23 @@ export default function Chat() {
                         ? "glass-liquid-accent rounded-tr-none border border-white/60 text-neutral-950"
                         : "glass-liquid rounded-tl-none border border-white/50 text-neutral-950"
                     }`}>
+                      {/* Attached file previews */}
+                      {msg.files?.length > 0 && (
+                        <div className="mb-2 flex flex-wrap gap-2">
+                          {msg.files.map((f, i) =>
+                            f.type === "image" && f.url ? (
+                              <img key={i} src={f.url} alt={f.name} className="max-h-40 rounded-lg border border-white/30 object-cover" />
+                            ) : (
+                              <div key={i} className="flex items-center gap-1.5 rounded-lg border border-neutral-200/50 bg-white/30 px-2.5 py-1.5 text-xs font-medium text-neutral-700">
+                                <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                </svg>
+                                {f.name}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
                       {visibleText && (
                         <p className="whitespace-pre-wrap">{visibleText}</p>
                       )}
@@ -702,6 +926,8 @@ export default function Chat() {
           </div>
         </div>
       )}
+
+      </div>
     </div>
   );
 }
