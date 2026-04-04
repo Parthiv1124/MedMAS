@@ -8,30 +8,29 @@ import { LuBrain } from "react-icons/lu";
 import { PiLightbulbFilament } from "react-icons/pi";
 import logo from "../assets/logo.png";
 
-// Session localStorage helpers
+// Session localStorage helpers (used as fast cache; Supabase is source of truth)
 const SESSIONS_KEY = "medmas_sessions";
 const msgKey = (id) => `medmas_session_${id}`;
-function readSessions() {
+
+function readSessionsLocal() {
   try {
     const raw = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
-    // Always return sorted most-recent-first
     return raw.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   } catch { return []; }
 }
-function writeSessions(arr) {
+function writeSessionsLocal(arr) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(arr));
 }
-function readMessages(sessionId) {
+function readMessagesLocal(sessionId) {
   try { return JSON.parse(localStorage.getItem(msgKey(sessionId)) || "[]"); }
   catch { return []; }
 }
-function appendMessages(sessionId, newMsgs) {
-  // Blob URLs expire; strip before persisting
+function appendMessagesLocal(sessionId, newMsgs) {
   const safe = newMsgs.map((m) => ({
     ...m,
     files: m.files?.map((f) => ({ ...f, url: null })) ?? undefined,
   }));
-  const existing = readMessages(sessionId);
+  const existing = readMessagesLocal(sessionId);
   localStorage.setItem(msgKey(sessionId), JSON.stringify([...existing, ...safe]));
 }
 function makeSessionId() {
@@ -45,6 +44,58 @@ function makeTitle(text) {
 
 function getSessionContext(sessions, sessionId) {
   return sessions.find((session) => session.id === sessionId)?.sessionContext || {};
+}
+
+// ── Supabase API helpers ────────────────────────────────────────────────────
+function mapApiSession(s) {
+  return {
+    id: s.id,
+    title: s.title || "New Chat",
+    tab: s.tab || "chat",
+    createdAt: s.created_at,
+    updatedAt: s.updated_at,
+    sessionContext: s.session_context || {},
+  };
+}
+
+function mapApiMessage(m) {
+  const meta = m.meta || {};
+  return {
+    id: m.id,
+    role: m.role,
+    text: m.content,
+    triage: meta.triage || undefined,
+    intent: meta.intent || undefined,
+    crisis: meta.crisis || false,
+    doctors: meta.doctors || undefined,
+    lang: meta.lang || undefined,
+    symptomResult: meta.symptomResult || undefined,
+    asha: meta.asha || undefined,
+  };
+}
+
+async function fetchSessionsFromAPI(userId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/sessions/${userId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.sessions || []).map(mapApiSession);
+  } catch { return null; }
+}
+
+async function fetchMessagesFromAPI(userId, sessionId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/sessions/${userId}/${sessionId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.messages || []).map(mapApiMessage);
+  } catch { return null; }
+}
+
+async function deleteSessionFromAPI(userId, sessionId) {
+  try {
+    await fetch(`${API_BASE}/api/chat/sessions/${userId}/${sessionId}`, { method: "DELETE" });
+  } catch { /* non-blocking */ }
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -230,22 +281,40 @@ export default function Chat() {
 
   // Sidebar / session state
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sessions, setSessions] = useState(() => readSessions());
+  const [sessions, setSessions] = useState(() => readSessionsLocal());
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const currentSessionRef = useRef(null); // mirror for async closures
 
+  const storedUser = localStorage.getItem("medmas_user");
+  const user = storedUser ? JSON.parse(storedUser) : null;
+  const userId = user?.id || "";
+  const ashaWorkerId = userId;
+
+  // On mount: hydrate sessions from Supabase (source of truth), fallback to localStorage
+  useEffect(() => {
+    if (!userId) return;
+    fetchSessionsFromAPI(userId).then((apiSessions) => {
+      if (apiSessions && apiSessions.length > 0) {
+        const sorted = apiSessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        setSessions(sorted);
+        writeSessionsLocal(sorted);
+      }
+    });
+  }, [userId]);
+
   // Session helpers
   const persistExchange = useCallback((sessionId, userMsg, assistantMsg) => {
-    // Append only the new pair; avoids re-reading stale data or double-writing
-    appendMessages(sessionId, [userMsg, assistantMsg]);
+    // Local cache for instant UI
+    appendMessagesLocal(sessionId, [userMsg, assistantMsg]);
     setSessions((prev) => {
       const now = new Date().toISOString();
       const updated = prev
         .map((s) => (s.id === sessionId ? { ...s, updatedAt: now } : s))
-        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); // keep most-recent first
-      writeSessions(updated);
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      writeSessionsLocal(updated);
       return updated;
     });
+    // Supabase persistence happens server-side via _persist_chat_turn
   }, []);
 
   function newChat() {
@@ -254,18 +323,27 @@ export default function Chat() {
     setMessages([]);
   }
 
-  function selectSession(id) {
+  async function selectSession(id) {
     if (id === currentSessionRef.current) return;
     currentSessionRef.current = id;
     setCurrentSessionId(id);
-    setMessages(readMessages(id));
+    // Show local cache immediately, then try Supabase
+    setMessages(readMessagesLocal(id));
+    if (userId) {
+      const apiMsgs = await fetchMessagesFromAPI(userId, id);
+      if (apiMsgs && apiMsgs.length > 0 && currentSessionRef.current === id) {
+        setMessages(apiMsgs);
+        // Update local cache
+        localStorage.setItem(msgKey(id), JSON.stringify(apiMsgs));
+      }
+    }
   }
 
   function deleteSession(id) {
     localStorage.removeItem(msgKey(id));
     setSessions((prev) => {
       const updated = prev.filter((s) => s.id !== id);
-      writeSessions(updated);
+      writeSessionsLocal(updated);
       return updated;
     });
     if (currentSessionRef.current === id) {
@@ -273,11 +351,9 @@ export default function Chat() {
       setCurrentSessionId(null);
       setMessages([]);
     }
+    // Delete from Supabase
+    if (userId) deleteSessionFromAPI(userId, id);
   }
-
-  const storedUser = localStorage.getItem("medmas_user");
-  const user = storedUser ? JSON.parse(storedUser) : null;
-  const ashaWorkerId = user?.id || "";
 
   function handleLogout() {
     localStorage.removeItem("medmas_token");
@@ -571,7 +647,7 @@ export default function Chat() {
       setSessions((prev) => {
         // New session is most recent; put it first, already sorted
         const updated = [newSession, ...prev];
-        writeSessions(updated);
+        writeSessionsLocal(updated);
         return updated;
       });
     }
@@ -579,12 +655,18 @@ export default function Chat() {
     setLoading(true);
     setActiveAgent("Crisis Guard scanning...");
 
+    const sessionTitle = sessions.find((s) => s.id === sessionId)?.title || makeTitle(text);
+
     try {
       let res;
       const sessionContext = getSessionContext(sessions, sessionId);
       if (files.length > 0) {
         const formData = new FormData();
         formData.append("message", text || "");
+        if (userId) formData.append("user_id", userId);
+        if (sessionId) formData.append("session_id", sessionId);
+        if (sessionTitle) formData.append("session_title", sessionTitle);
+        formData.append("session_tab", tab);
         if (district) formData.append("user_district", district);
         if (userCoords?.lat) formData.append("user_lat", String(userCoords.lat));
         if (userCoords?.lng) formData.append("user_lng", String(userCoords.lng));
@@ -598,6 +680,10 @@ export default function Chat() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
+            user_id: userId || undefined,
+            session_id: sessionId || undefined,
+            session_title: sessionTitle || undefined,
+            session_tab: tab,
             user_district: district,
             user_lat: userCoords?.lat,
             user_lng: userCoords?.lng,
@@ -685,7 +771,7 @@ export default function Chat() {
       setCurrentSessionId(sessionId);
       setSessions((prev) => {
         const updated = [newSession, ...prev];
-        writeSessions(updated);
+        writeSessionsLocal(updated);
         return updated;
       });
     }
@@ -1528,41 +1614,57 @@ export default function Chat() {
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Nearby Doctors</p>
                           {msg.doctors.slice(0, 3).map((d, j) => {
                             const mapsUrl = getDoctorMapsUrl(d, district);
+                            // Specialty from OSM can be semicolon-separated; take first meaningful one
+                            const specialtyLabel = d.specialty
+                              ? d.specialty.split(";")[0].replace(/_/g, " ").trim()
+                              : "";
 
                             return (
-                              <a
-                                key={j}
-                                href={mapsUrl || '#'}
-                                target="_blank"
-                                rel="noreferrer"
-                                aria-label={`Open ${d.name || 'doctor location'} in Google Maps`}
-                                onClick={event => {
-                                  if (!mapsUrl) event.preventDefault();
-                                }}
-                                className="glass-liquid flex flex-col gap-2 rounded-lg border border-white/45 px-3 py-2 transition hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400/40 sm:flex-row sm:items-center sm:gap-2.5"
-                              >
-                                <div className="flex w-full items-start gap-2.5 sm:w-auto sm:items-center">
-                                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-400 text-[9px] font-bold text-white">
-                                    {(d.name || 'D')[0]}
+                              <div key={j} className="overflow-hidden rounded-xl border border-neutral-200/60 bg-white/70 shadow-sm backdrop-blur-sm dark:border-neutral-700/50 dark:bg-neutral-800/60">
+                                {/* Card header */}
+                                <div className="flex items-center gap-3 border-b border-neutral-100/80 px-4 py-3 dark:border-neutral-700/40">
+                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-400 text-xs font-bold text-white shadow-sm">
+                                    {(d.name || "D")[0]}
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <p className="truncate text-xs font-semibold text-neutral-900">{d.name}</p>
-                                    <p className="text-[10px] text-neutral-500">
-                                      {d.specialty}{d.distance_km != null ? ` · ${d.distance_km} km away` : ''}
-                                    </p>
-                                    {d.address && <p className="truncate text-[10px] text-neutral-400">{d.address}</p>}
+                                    <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{d.name}</p>
+                                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                      {specialtyLabel && (
+                                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium capitalize text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                                          {specialtyLabel}
+                                        </span>
+                                      )}
+                                      {d.distance_km != null && (
+                                        <span className="text-[10px] text-neutral-400">· {d.distance_km} km away</span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
-                                  <div className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
-                                    {d.phone && <><PhoneIcon />{d.phone}</>}
+                                {/* Card footer */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                                  <div className="min-w-0 flex-1">
+                                    {d.address && (
+                                      <p className="truncate text-[10px] text-neutral-500 dark:text-neutral-400">{d.address}</p>
+                                    )}
+                                    {d.phone && (
+                                      <p className="mt-0.5 flex items-center gap-1 font-mono text-[10px] text-brand-600 dark:text-brand-400">
+                                        <PhoneIcon />{d.phone}
+                                      </p>
+                                    )}
                                   </div>
-                                  <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
+                                  <a
+                                    href={mapsUrl || "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    aria-label={`Open ${d.name || "doctor"} in Google Maps`}
+                                    onClick={e => { if (!mapsUrl) e.preventDefault(); }}
+                                    className="flex shrink-0 items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-[10px] font-semibold text-brand-600 transition hover:bg-brand-100 dark:bg-brand-950/40 dark:text-brand-400 dark:hover:bg-brand-900/40"
+                                  >
                                     <span>Map</span>
                                     <ArrowUpRightIcon />
-                                  </div>
+                                  </a>
                                 </div>
-                              </a>
+                              </div>
                             );
                           })}
                         </div>
