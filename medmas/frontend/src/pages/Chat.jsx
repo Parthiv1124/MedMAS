@@ -1354,6 +1354,9 @@ export default function Chat() {
                         </div>
                       )}
 
+                      </div>
+                    )}
+
                       {/* Doctor cards */}
                       {msg.doctors?.length > 0 && (
                         <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3 dark:border-neutral-700/40">
@@ -1399,8 +1402,6 @@ export default function Chat() {
                           })}
                         </div>
                       )}
-                      </div>
-                    )}
                     </div>
                     </div>
 

@@ -22,6 +22,27 @@ CREATE TABLE health_logs (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Chat session history
+CREATE TABLE chat_sessions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL,
+    title           TEXT NOT NULL DEFAULT 'New Chat',
+    tab             TEXT NOT NULL DEFAULT 'chat' CHECK (tab IN ('chat', 'asha')),
+    session_context JSONB DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE chat_messages (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    user_id    UUID NOT NULL,
+    role       TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content    TEXT NOT NULL DEFAULT '',
+    meta       JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ASHA worker patient queue
 CREATE TABLE asha_patients (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -52,6 +73,10 @@ CREATE TABLE asha_assessments (
 -- Indexes for performance
 CREATE INDEX idx_health_logs_user_id  ON health_logs(user_id);
 CREATE INDEX idx_health_logs_type     ON health_logs(log_type);
+CREATE INDEX idx_chat_sessions_user_id ON chat_sessions(user_id);
+CREATE INDEX idx_chat_sessions_updated_at ON chat_sessions(updated_at DESC);
+CREATE INDEX idx_chat_messages_session_id ON chat_messages(session_id);
+CREATE INDEX idx_chat_messages_user_id ON chat_messages(user_id);
 CREATE INDEX idx_asha_patients_worker ON asha_patients(asha_worker_id);
 CREATE INDEX idx_asha_assess_patient  ON asha_assessments(patient_id);
 

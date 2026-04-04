@@ -14,7 +14,8 @@
       "Bash(python:*)",
       "Bash(venv/Scripts/python -c \"import openai; print\\(openai.__version__\\)\")",
       "Bash(venv/Scripts/python -c \"import langchain_openai; print\\(langchain_openai.__version__\\)\")",
-      "Bash(venv/Scripts/pip install:*)"
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(git stash:*)"
     ]
   }
 }
