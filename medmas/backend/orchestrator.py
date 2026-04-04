@@ -1,4 +1,8 @@
 # backend/orchestrator.py
+from datetime import datetime
+from uuid import uuid4
+import logging
+
 from langgraph.graph import StateGraph, END
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -13,6 +17,13 @@ from agents.health_scorer   import health_scorer_node
 from agents.asha_copilot    import asha_copilot_node
 from services.doctor_finder import find_doctors, get_known_districts
 from services.osm_doctor_finder import find_nearby_doctors
+
+LOGGER = logging.getLogger("medmas.orchestrator")
+if not LOGGER.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[Orch] %(message)s"))
+    LOGGER.addHandler(handler)
+LOGGER.setLevel(logging.INFO)
 
 DOCTOR_REFERRAL_FOOTER = (
     "\n\n---\n"
@@ -187,6 +198,12 @@ def intent_classifier_node(state: MedMASState) -> dict:
         "offtopic":  ["offtopic_responder"],
     }
 
+    hint_intent = state.get("hint_intent")
+    if hint_intent:
+        agents = agent_map.get(hint_intent, ["symptom_checker"])
+        LOGGER.info(f"hint intent {hint_intent}, forcing agents {agents}")
+        return {"intent": hint_intent, "agents_to_run": agents}
+
     # If crisis guard already set intent, respect it
     if state.get("crisis_detected") and state.get("intent") == "mental":
         return {"intent": "mental", "agents_to_run": ["empathy_chatbot"]}
@@ -212,6 +229,7 @@ def intent_classifier_node(state: MedMASState) -> dict:
     intent  = chain.invoke({"query": query}).strip().lower()
 
     agents = agent_map.get(intent, ["symptom_checker"])
+    LOGGER.info(f"Intent classified as {intent}; running agents {agents}")
     return {"intent": intent, "agents_to_run": agents}
 
 def route_by_intent(state: MedMASState) -> str:
@@ -225,7 +243,9 @@ def route_by_intent(state: MedMASState) -> str:
         "asha":      "asha_copilot",
         "offtopic":  "offtopic_responder",
     }
-    return route_map.get(state.get("intent", "symptom"), "symptom_checker")
+    route = route_map.get(state.get("intent", "symptom"), "symptom_checker")
+    LOGGER.info(f"Routing {state.get('intent')} via {route}")
+    return route
 
 # ── Off-Topic Guardrail Node ───────────────────────────────────────────────
 OFFTOPIC_PROMPT = """You are MedMAS, a Multi-Agent AI Health System for rural India.
@@ -295,6 +315,29 @@ def session_memory_node(state: MedMASState) -> dict:
     )
     ctx["last_intent"] = state.get("intent", "")
     ctx["last_triage_level"] = state.get("triage_level", "routine")
+
+    lab_session = ctx.get("lab_session", {})
+    if state.get("media_type") == "pdf" and state.get("disease_result"):
+        lab_session = lab_session or {}
+        if not lab_session.get("id"):
+            lab_session["id"] = str(uuid4())
+        if not lab_session.get("created_at"):
+            lab_session["created_at"] = datetime.utcnow().isoformat()
+        lab_session["latest_triage"] = state.get("triage_level", "routine")
+        lab_session["summary"] = {
+            "conditions": state["disease_result"].get("conditions", []),
+            "urgency_flag": state["disease_result"].get("urgency_flag"),
+        }
+        lab_session["query"] = state.get("raw_input", "")
+        lab_session["last_updated"] = datetime.utcnow().isoformat()
+        ctx["lab_session"] = lab_session
+        LOGGER.info(
+            "lab_session updated "
+            f"id={lab_session['id']} triage={lab_session['latest_triage']} "
+            f"conditions={[c.get('name') for c in lab_session.get('summary', {}).get('conditions', [])]}"
+        )
+    elif lab_session:
+        ctx["lab_session"] = lab_session
     return {"session_context": ctx}
 
 
@@ -628,6 +671,7 @@ async def run_pipeline(
     patient_id:      str   = None,
     session_context: dict  = None,
     session_history: list  = None,
+    hint_intent:     str   = None,
 ) -> MedMASState:
     state = initial_state(
         raw_input=raw_input,
@@ -643,5 +687,15 @@ async def run_pipeline(
         patient_id=patient_id,
         session_context=session_context or {},
         session_history=session_history or [],
+        hint_intent=hint_intent,
     )
-    return await medmas_graph.ainvoke(state)
+    LOGGER.info(
+        "run_pipeline start "
+        f"user_id={user_id or 'anon'} media={media_type} hint_intent={hint_intent} asha_mode={asha_mode}"
+    )
+    result = await medmas_graph.ainvoke(state)
+    LOGGER.info(
+        "run_pipeline end "
+        f"intent={result.get('intent')} triage={result.get('triage_level')} trace={result.get('processing_trace')}"
+    )
+    return result

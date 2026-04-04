@@ -37,6 +37,14 @@ from services.osm_doctor_finder import find_nearby_doctors
 from services.notifications import send_sms
 import httpx
 import pandas as pd
+import logging
+
+LOGGER = logging.getLogger("medmas.api")
+if not LOGGER.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[API] %(message)s"))
+    LOGGER.addHandler(handler)
+LOGGER.setLevel(logging.INFO)
 
 # In-memory OTP store: {phone: {"otp": "123456", "expires_at": timestamp}}
 _otp_store: dict = {}
@@ -177,6 +185,7 @@ def health_check():
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     """Main endpoint: accepts text query in any Indian language."""
+    LOGGER.info(f"chat request user={req.user_id or 'anon'} tab={req.session_tab} message={req.message[:80]}")
     try:
         result = await run_pipeline(
             raw_input=req.message,
@@ -194,6 +203,7 @@ async def chat(req: ChatRequest):
             detail="DeepInfra authentication failed. Check DEEPINFRA_API_KEY and DeepInfra model names in .env.",
         )
     except Exception as e:
+        LOGGER.exception("chat request failed")
         raise HTTPException(status_code=500, detail=str(e))
 
     # Persist to Supabase (non-blocking)
@@ -291,6 +301,11 @@ async def chat_upload(
             except Exception:
                 extracted_parts.append(f"[Attached document: {f.filename} — could not read contents]")
 
+    LOGGER.info(
+        f"chat/upload user={user_id or 'anon'} session_id={session_id} files={[f.filename for f in files]} "
+        f"pdf={'yes' if pdf_bytes_combined else 'no'}"
+    )
+
     # Build enriched message with extracted content
     enriched = message or ""
     if extracted_parts:
@@ -312,10 +327,12 @@ async def chat_upload(
             user_lng=user_lng,
             session_context=parsed_context,
             session_history=parsed_history,
+            hint_intent="lab" if media_type == "pdf" else None,
         )
     except AuthenticationError:
         raise HTTPException(401, "DeepInfra authentication failed.")
     except Exception as e:
+        LOGGER.exception("chat/upload failed")
         raise HTTPException(500, str(e))
 
     health_score = None
@@ -360,6 +377,7 @@ async def upload_lab(
     if not file.filename.endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are accepted.")
     pdf_bytes = await file.read()
+    LOGGER.info(f"upload_lab user={user_id or 'anon'} filename={file.filename}")
     try:
         result = await run_pipeline(
             raw_input="Lab report uploaded for analysis",
@@ -368,8 +386,10 @@ async def upload_lab(
             user_id=user_id,
             user_district=user_district,
             user_phone=user_phone,
+            hint_intent="lab",
         )
     except Exception as e:
+        LOGGER.exception("upload_lab failed")
         raise HTTPException(500, str(e))
 
     return {
