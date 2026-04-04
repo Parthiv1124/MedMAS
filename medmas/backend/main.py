@@ -25,6 +25,37 @@ from services.chat_history import (
     save_chat_exchange,
     delete_chat_session,
 )
+from services.doctor_service import (
+    register_doctor,
+    get_doctor_by_user_id,
+    get_doctor_by_id,
+    list_doctors,
+    update_doctor_status,
+    match_doctors,
+)
+from services.case_service import (
+    create_case,
+    get_case,
+    list_cases_for_user,
+    list_cases_for_session,
+    list_cases_for_doctor,
+    list_unassigned_cases,
+    assign_case,
+    accept_case,
+    start_case,
+    complete_case,
+    close_case,
+    send_message,
+    get_messages,
+    grant_consent,
+    revoke_consent,
+    get_consent_for_case,
+)
+from services.prescription_service import (
+    create_prescription,
+    get_prescriptions_for_case,
+    get_prescriptions_for_patient,
+)
 from config import (
     supabase,
     supabase_db,
@@ -99,6 +130,64 @@ def _persist_chat_turn(
     )
 
 
+def _sort_by_created_at(rows: list[dict], *, reverse: bool = False) -> list[dict]:
+    return sorted(rows, key=lambda row: row.get("created_at") or "", reverse=reverse)
+
+
+def _build_session_consultation(user_id: Optional[str], session_id: Optional[str]) -> Optional[dict]:
+    if not user_id or not session_id:
+        return None
+
+    cases = list_cases_for_session(user_id, session_id)
+    if not cases:
+        return None
+
+    enriched_cases = []
+    all_messages = []
+    all_prescriptions = []
+
+    for case in cases:
+        case_id = case.get("id")
+        if not case_id:
+            continue
+
+        messages = get_messages(case_id)
+        prescriptions = get_prescriptions_for_case(case_id)
+        enriched_case = {
+            **case,
+            "messages": messages,
+            "prescriptions": prescriptions,
+        }
+        enriched_cases.append(enriched_case)
+
+        all_messages.extend(
+            {
+                **message,
+                "case_id": case_id,
+                "case_status": case.get("status"),
+            }
+            for message in messages
+        )
+        all_prescriptions.extend(
+            {
+                **prescription,
+                "case_id": case_id,
+                "case_status": case.get("status"),
+            }
+            for prescription in prescriptions
+        )
+
+    if not enriched_cases:
+        return None
+
+    return {
+        "cases": enriched_cases,
+        "latest_case": enriched_cases[0],
+        "messages": _sort_by_created_at(all_messages),
+        "prescriptions": _sort_by_created_at(all_prescriptions, reverse=True),
+    }
+
+
 def _sync_public_user(
     user_id: str,
     phone: str = "",
@@ -163,6 +252,7 @@ class ChatResponse(BaseModel):
     crisis_detected:   bool = False
     symptom_result:    Optional[dict] = None
     session_context:   dict = {}
+    consultation:      Optional[dict] = None
 
 
 class TranscriptionResponse(BaseModel):
@@ -232,6 +322,12 @@ async def chat(req: ChatRequest):
     except Exception:
         pass
 
+    consultation = None
+    try:
+        consultation = _build_session_consultation(req.user_id, req.session_id)
+    except Exception:
+        pass
+
     return ChatResponse(
         response=result.get("final_response", ""),
         original_language=result.get("input_lang", "en"),
@@ -242,6 +338,7 @@ async def chat(req: ChatRequest):
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
         session_context=result.get("session_context", {}),
+        consultation=consultation,
     )
 
 @app.post("/api/chat/upload")
@@ -337,6 +434,12 @@ async def chat_upload(
     except Exception:
         pass
 
+    consultation = None
+    try:
+        consultation = _build_session_consultation(user_id, session_id)
+    except Exception:
+        pass
+
     return ChatResponse(
         response=result.get("final_response", ""),
         original_language=result.get("input_lang", "en"),
@@ -347,6 +450,7 @@ async def chat_upload(
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
         session_context=result.get("session_context", {}),
+        consultation=consultation,
     )
 
 @app.post("/api/upload-lab")
@@ -709,6 +813,7 @@ def get_chat_session_detail(user_id: str, session_id: str):
         payload = get_chat_session(user_id, session_id)
         if not payload.get("session"):
             raise HTTPException(404, "Chat session not found")
+        payload["consultation"] = _build_session_consultation(user_id, session_id)
         return payload
     except HTTPException:
         raise
@@ -901,6 +1006,400 @@ def patient_history(patient_id: str):
         return {"assessments": get_assessment_history(patient_id)}
     except RuntimeError as e:
         raise HTTPException(503, str(e))
+
+# ── Doctor Consultation Models ────────────────────────────────────────────
+
+class DoctorSignupRequest(BaseModel):
+    name:           str
+    email:          str
+    phone:          str
+    password:       str
+    specialty:      str = "General"
+    license_number: str = ""
+    district:       str = ""
+    bio:            str = ""
+
+class DoctorLoginRequest(BaseModel):
+    email:    str
+    password: str
+
+class CreateCaseRequest(BaseModel):
+    user_id:          str
+    session_id:       Optional[str] = None
+    symptoms_summary: str = ""
+    ai_suggestion:    str = ""
+    triage_level:     str = "routine"
+    specialty_needed: str = "General"
+    district:         str = ""
+    consent_scope:    List[str] = ["chat"]
+    doctor_id:        Optional[str] = None  # if set, case is directly assigned to this doctor
+
+class CaseStatusRequest(BaseModel):
+    case_id:   str
+    doctor_id: Optional[str] = None
+
+class SendMessageRequest(BaseModel):
+    case_id:     str
+    sender_id:   str
+    sender_type: str   # "doctor" | "patient"
+    message:     str
+
+class PrescriptionRequest(BaseModel):
+    case_id:        str
+    doctor_id:      str
+    patient_id:     str
+    diagnosis:      str = ""
+    medications:    List[dict] = []
+    instructions:   str = ""
+    follow_up_date: Optional[str] = None
+
+class ConsentRevokeRequest(BaseModel):
+    consent_id: str
+
+# ── Doctor Auth Endpoints ─────────────────────────────────────────────────
+
+@app.post("/api/doctor/signup")
+async def doctor_signup(req: DoctorSignupRequest):
+    """Register a new doctor: create auth user + doctor profile."""
+    if not supabase:
+        raise HTTPException(503, "Auth service not configured")
+    try:
+        auth_res = supabase.auth.sign_up({
+            "email": req.email,
+            "password": req.password,
+            "options": {
+                "data": {
+                    "name": req.name,
+                    "phone": req.phone,
+                    "district": req.district,
+                    "role": "doctor",
+                }
+            }
+        })
+        if auth_res.user is None:
+            raise HTTPException(400, "Signup failed — check email and password")
+        # Sync public.users — non-blocking; the auth trigger may have already done this
+        try:
+            _sync_public_user(
+                user_id=auth_res.user.id,
+                phone=req.phone,
+                district=req.district,
+            )
+        except Exception as sync_err:
+            print(f"[Doctor Signup] _sync_public_user non-fatal: {sync_err}")
+        doctor = register_doctor(
+            user_id=auth_res.user.id,
+            name=req.name,
+            email=req.email,
+            phone=req.phone,
+            specialty=req.specialty,
+            license_number=req.license_number,
+            district=req.district,
+            bio=req.bio,
+        )
+        return {
+            "access_token": auth_res.session.access_token if auth_res.session else "",
+            "user": {
+                "id":       auth_res.user.id,
+                "email":    auth_res.user.email,
+                "name":     req.name,
+                "phone":    req.phone,
+                "district": req.district,
+                "role":     "doctor",
+            },
+            "doctor": doctor,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/doctor/login")
+async def doctor_login(req: DoctorLoginRequest):
+    """Authenticate doctor and return profile."""
+    if not supabase:
+        raise HTTPException(503, "Auth service not configured")
+    try:
+        auth_res = supabase.auth.sign_in_with_password({
+            "email": req.email,
+            "password": req.password,
+        })
+        if auth_res.user is None:
+            raise HTTPException(401, "Invalid email or password")
+        doctor = get_doctor_by_user_id(auth_res.user.id)
+        if not doctor:
+            raise HTTPException(403, "No doctor profile found for this account")
+        user_meta = auth_res.user.user_metadata or {}
+        return {
+            "access_token": auth_res.session.access_token,
+            "user": {
+                "id":       auth_res.user.id,
+                "email":    auth_res.user.email,
+                "name":     user_meta.get("name", ""),
+                "phone":    user_meta.get("phone", ""),
+                "district": user_meta.get("district", ""),
+                "role":     "doctor",
+            },
+            "doctor": doctor,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(401, str(e))
+
+
+@app.get("/api/doctor/profile/{user_id}")
+def get_doctor_profile(user_id: str):
+    """Get doctor profile by auth user ID."""
+    doctor = get_doctor_by_user_id(user_id)
+    if not doctor:
+        raise HTTPException(404, "Doctor not found")
+    return {"doctor": doctor}
+
+
+@app.post("/api/admin/doctor/verify/{doctor_id}")
+def admin_verify_doctor(doctor_id: str):
+    """Admin endpoint: verify a doctor (pending → verified).
+
+    In production, add authentication + authorization checks here.
+    For now, this is accessible to anyone — add API key or auth guard.
+    """
+    try:
+        doctor = update_doctor_status(doctor_id, "verified")
+        return {"doctor": doctor, "status": "verified"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/admin/doctor/reject/{doctor_id}")
+def admin_reject_doctor(doctor_id: str):
+    """Admin endpoint: reject a doctor (pending → rejected)."""
+    try:
+        doctor = update_doctor_status(doctor_id, "rejected")
+        return {"doctor": doctor, "status": "rejected"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/doctors/list")
+def list_all_doctors(specialty: str = "", district: str = "", verified_only: bool = True):
+    """List doctors with optional filters."""
+    return {"doctors": list_doctors(specialty, district, verified_only)}
+
+
+# ── Case Endpoints ────────────────────────────────────────────────────────
+
+@app.post("/api/cases")
+def create_new_case(req: CreateCaseRequest):
+    """Patient requests a doctor consultation — creates case + consent."""
+    try:
+        case = create_case(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            symptoms_summary=req.symptoms_summary,
+            ai_suggestion=req.ai_suggestion,
+            triage_level=req.triage_level,
+            specialty_needed=req.specialty_needed,
+            district=req.district,
+        )
+        if not case:
+            raise HTTPException(500, "Failed to create case")
+
+        consent = grant_consent(
+            user_id=req.user_id,
+            case_id=case["id"],
+            doctor_id=req.doctor_id,
+            scope=req.consent_scope,
+        )
+
+        # If a specific doctor was chosen, assign directly (requested → assigned)
+        if req.doctor_id:
+            case = assign_case(case["id"], req.doctor_id)
+
+        # Auto-match doctors for informational display
+        matched = match_doctors(
+            specialty=req.specialty_needed,
+            district=req.district,
+            limit=5,
+        )
+
+        return {"case": case, "consent": consent, "matched_doctors": matched}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/cases/user/{user_id}")
+def get_user_cases(user_id: str):
+    """List all cases for a patient."""
+    try:
+        return {"cases": list_cases_for_user(user_id)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/cases/doctor/{doctor_id}")
+def get_doctor_cases(doctor_id: str):
+    """List active cases assigned to a doctor — the doctor's queue."""
+    try:
+        return {"cases": list_cases_for_doctor(doctor_id)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/cases/unassigned")
+def get_unassigned_cases(specialty: str = "", district: str = ""):
+    """List cases waiting to be assigned to a doctor."""
+    try:
+        return {"cases": list_unassigned_cases(specialty, district)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/cases/{case_id}")
+def get_case_detail(case_id: str):
+    """Get full case detail including consent, messages, prescriptions."""
+    try:
+        case = get_case(case_id)
+        if not case:
+            raise HTTPException(404, "Case not found")
+        consent = get_consent_for_case(case_id)
+        messages = get_messages(case_id)
+        prescriptions = get_prescriptions_for_case(case_id)
+        return {
+            "case": case,
+            "consent": consent,
+            "messages": messages,
+            "prescriptions": prescriptions,
+        }
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+# ── Case State Transitions ───────────────────────────────────────────────
+
+@app.post("/api/cases/{case_id}/assign")
+def assign_case_endpoint(case_id: str, req: CaseStatusRequest):
+    """Assign a case to a doctor (requested → assigned)."""
+    try:
+        case = assign_case(case_id, req.doctor_id)
+        return {"case": case}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/cases/{case_id}/accept")
+def accept_case_endpoint(case_id: str):
+    """Doctor accepts a case (assigned → accepted)."""
+    try:
+        return {"case": accept_case(case_id)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/cases/{case_id}/start")
+def start_case_endpoint(case_id: str):
+    """Doctor starts consultation (accepted → in_progress)."""
+    try:
+        return {"case": start_case(case_id)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/cases/{case_id}/complete")
+def complete_case_endpoint(case_id: str):
+    """Mark case as completed (in_progress → completed)."""
+    try:
+        return {"case": complete_case(case_id)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/cases/{case_id}/close")
+def close_case_endpoint(case_id: str):
+    """Close a case from any state."""
+    try:
+        return {"case": close_case(case_id)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# ── Doctor-Patient Messaging ─────────────────────────────────────────────
+
+@app.post("/api/cases/{case_id}/messages")
+def post_message(case_id: str, req: SendMessageRequest):
+    """Send a message in a case thread."""
+    try:
+        msg = send_message(case_id, req.sender_id, req.sender_type, req.message)
+        return {"message": msg}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/cases/{case_id}/messages")
+def get_case_messages(case_id: str):
+    """Get all messages for a case."""
+    try:
+        return {"messages": get_messages(case_id)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+# ── Prescriptions ────────────────────────────────────────────────────────
+
+@app.post("/api/prescriptions")
+def create_new_prescription(req: PrescriptionRequest):
+    """Doctor writes a structured prescription for a case."""
+    try:
+        rx = create_prescription(
+            case_id=req.case_id,
+            doctor_id=req.doctor_id,
+            patient_id=req.patient_id,
+            diagnosis=req.diagnosis,
+            medications=req.medications,
+            instructions=req.instructions,
+            follow_up_date=req.follow_up_date,
+        )
+        return {"prescription": rx}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/prescriptions/case/{case_id}")
+def get_case_prescriptions(case_id: str):
+    return {"prescriptions": get_prescriptions_for_case(case_id)}
+
+
+@app.get("/api/prescriptions/patient/{patient_id}")
+def get_patient_prescriptions(patient_id: str):
+    return {"prescriptions": get_prescriptions_for_patient(patient_id)}
+
+
+# ── Consent Management ───────────────────────────────────────────────────
+
+@app.post("/api/consent/revoke")
+def revoke_consent_endpoint(req: ConsentRevokeRequest):
+    """Revoke a previously granted consent."""
+    try:
+        revoke_consent(req.consent_id)
+        return {"revoked": True}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

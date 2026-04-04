@@ -70,6 +70,78 @@ CREATE TABLE asha_assessments (
     created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── Doctor Consultation System ──────────────────────────────────────────
+
+-- Doctors table (profile + verification)
+-- Note: user_id stores the Supabase auth user id but has no FK to public.users
+-- to avoid race conditions between auth trigger and profile creation.
+CREATE TABLE doctors (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        UUID UNIQUE,
+    name           TEXT NOT NULL,
+    email          TEXT UNIQUE NOT NULL,
+    phone          TEXT NOT NULL,
+    specialty      TEXT NOT NULL DEFAULT 'General',
+    license_number TEXT DEFAULT '',
+    district       TEXT DEFAULT '',
+    bio            TEXT DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','verified','rejected')),
+    created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Consent: user grants doctor access to their data
+CREATE TABLE consents (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    case_id    UUID,
+    doctor_id  UUID REFERENCES doctors(id),
+    scope      TEXT[] DEFAULT ARRAY['chat'],
+    granted_at TIMESTAMPTZ DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ,
+    active     BOOLEAN DEFAULT TRUE
+);
+
+-- Cases: structured view of a patient consultation
+CREATE TABLE cases (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    doctor_id        UUID REFERENCES doctors(id),
+    session_id       UUID REFERENCES chat_sessions(id),
+    status           TEXT NOT NULL DEFAULT 'requested'
+                     CHECK (status IN ('requested','assigned','accepted','in_progress','completed','closed')),
+    symptoms_summary TEXT DEFAULT '',
+    ai_suggestion    TEXT DEFAULT '',
+    triage_level     TEXT DEFAULT 'routine',
+    specialty_needed TEXT DEFAULT 'General',
+    district         TEXT DEFAULT '',
+    notes            TEXT DEFAULT '',
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Doctor-patient async messages
+CREATE TABLE doctor_messages (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id     UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    sender_type TEXT NOT NULL CHECK (sender_type IN ('doctor','patient')),
+    sender_id   UUID NOT NULL,
+    message     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Structured prescriptions
+CREATE TABLE prescriptions (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id        UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    doctor_id      UUID NOT NULL REFERENCES doctors(id),
+    patient_id     UUID NOT NULL REFERENCES users(id),
+    diagnosis      TEXT DEFAULT '',
+    medications    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    instructions   TEXT DEFAULT '',
+    follow_up_date DATE,
+    created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX idx_health_logs_user_id  ON health_logs(user_id);
 CREATE INDEX idx_health_logs_type     ON health_logs(log_type);
@@ -79,6 +151,17 @@ CREATE INDEX idx_chat_messages_session_id ON chat_messages(session_id);
 CREATE INDEX idx_chat_messages_user_id ON chat_messages(user_id);
 CREATE INDEX idx_asha_patients_worker ON asha_patients(asha_worker_id);
 CREATE INDEX idx_asha_assess_patient  ON asha_assessments(patient_id);
+CREATE INDEX idx_doctors_user_id     ON doctors(user_id);
+CREATE INDEX idx_doctors_specialty   ON doctors(specialty);
+CREATE INDEX idx_doctors_district    ON doctors(district);
+CREATE INDEX idx_doctors_status      ON doctors(status);
+CREATE INDEX idx_consents_user_id    ON consents(user_id);
+CREATE INDEX idx_consents_case_id    ON consents(case_id);
+CREATE INDEX idx_cases_user_id       ON cases(user_id);
+CREATE INDEX idx_cases_doctor_id     ON cases(doctor_id);
+CREATE INDEX idx_cases_status        ON cases(status);
+CREATE INDEX idx_doctor_messages_case ON doctor_messages(case_id);
+CREATE INDEX idx_prescriptions_case  ON prescriptions(case_id);
 
 -- Keep public.users aligned with Supabase Auth users.
 -- This makes auth.users.id and public.users.id the same identity for app-level foreign keys.

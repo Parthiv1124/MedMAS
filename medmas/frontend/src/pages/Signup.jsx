@@ -309,6 +309,10 @@ export default function Signup() {
               Already have an account?{" "}
               <Link to="/login">Sign in</Link>
             </p>
+            <p className="auth-switch" style={{ marginTop: "4px" }}>
+              Are you a doctor?{" "}
+              <Link to="/doctor/signup">Register as Doctor</Link>
+            </p>
           </div>
         </div>
       </div>

@@ -74,6 +74,16 @@ function mapApiMessage(m) {
   };
 }
 
+function mapConsultationPayload(consultation) {
+  if (!consultation) return null;
+  return {
+    cases: consultation.cases || [],
+    latestCase: consultation.latest_case || null,
+    messages: consultation.messages || [],
+    prescriptions: consultation.prescriptions || [],
+  };
+}
+
 async function fetchSessionsFromAPI(userId) {
   try {
     const res = await fetch(`${API_BASE}/api/chat/sessions/${userId}`);
@@ -83,12 +93,16 @@ async function fetchSessionsFromAPI(userId) {
   } catch { return null; }
 }
 
-async function fetchMessagesFromAPI(userId, sessionId) {
+async function fetchSessionDetailFromAPI(userId, sessionId) {
   try {
     const res = await fetch(`${API_BASE}/api/chat/sessions/${userId}/${sessionId}`);
     if (!res.ok) return null;
     const data = await res.json();
-    return (data.messages || []).map(mapApiMessage);
+    return {
+      session: data.session ? mapApiSession(data.session) : null,
+      messages: (data.messages || []).map(mapApiMessage),
+      consultation: mapConsultationPayload(data.consultation),
+    };
   } catch { return null; }
 }
 
@@ -235,6 +249,19 @@ function formatLabel(text) {
     .replace(/\b\w/g, char => char.toUpperCase());
 }
 
+function formatRelativeTime(iso) {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 function getLocationBadgeClasses(status) {
   if (status === "live") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "detecting") return "border-sky-200 bg-sky-50 text-sky-700";
@@ -274,6 +301,18 @@ export default function Chat() {
     priority: "1",
     notes: "",
   });
+  // Consult-a-doctor inline state
+  const [consultStep, setConsultStep] = useState("idle"); // idle | consent | creating | done
+  const [consultMsgId, setConsultMsgId] = useState(null); // which message triggered it
+  const [consultDoctorId, setConsultDoctorId] = useState(null); // specific registered doctor
+  const [consultDoctorName, setConsultDoctorName] = useState("");
+  const [consultScope, setConsultScope] = useState(["chat"]);
+  const [consultCase, setConsultCase] = useState(null);
+  const [consultError, setConsultError] = useState("");
+  const [consultationReply, setConsultationReply] = useState("");
+  const [consultationReplyLoading, setConsultationReplyLoading] = useState(false);
+  const [consultationReplyError, setConsultationReplyError] = useState("");
+
   const bottomRef                         = useRef(null);
   const messagesRef = useRef([]);
   const requestInFlightRef = useRef(false);
@@ -283,6 +322,7 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sessions, setSessions] = useState(() => readSessionsLocal());
   const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [consultation, setConsultation] = useState(null);
   const currentSessionRef = useRef(null); // mirror for async closures
 
   const storedUser = localStorage.getItem("medmas_user");
@@ -317,10 +357,56 @@ export default function Chat() {
     // Supabase persistence happens server-side via _persist_chat_turn
   }, []);
 
+  const syncSessionMeta = useCallback((sessionId, patch) => {
+    if (!sessionId) return;
+    setSessions((prev) => {
+      const updated = prev
+        .map((session) => (session.id === sessionId ? { ...session, ...patch } : session))
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      writeSessionsLocal(updated);
+      return updated;
+    });
+  }, []);
+
+  const hydrateSessionDetail = useCallback(async (sessionId) => {
+    if (!userId || !sessionId) return null;
+    const payload = await fetchSessionDetailFromAPI(userId, sessionId);
+    if (!payload || currentSessionRef.current !== sessionId) return payload;
+
+    setMessages(payload.messages || []);
+    setConsultation(payload.consultation || null);
+
+    if (payload.session) {
+      syncSessionMeta(sessionId, {
+        title: payload.session.title,
+        tab: payload.session.tab,
+        createdAt: payload.session.createdAt,
+        updatedAt: payload.session.updatedAt,
+        sessionContext: payload.session.sessionContext || {},
+      });
+    }
+
+    localStorage.setItem(msgKey(sessionId), JSON.stringify(payload.messages || []));
+    return payload;
+  }, [syncSessionMeta, userId]);
+
+  useEffect(() => {
+    if (!userId || !currentSessionId || tab !== "chat") return undefined;
+
+    const intervalId = setInterval(() => {
+      void hydrateSessionDetail(currentSessionId);
+    }, 15000);
+
+    return () => clearInterval(intervalId);
+  }, [currentSessionId, hydrateSessionDetail, tab, userId]);
+
   function newChat() {
     currentSessionRef.current = null;
     setCurrentSessionId(null);
     setMessages([]);
+    setConsultation(null);
+    setConsultationReply("");
+    setConsultationReplyError("");
   }
 
   async function selectSession(id) {
@@ -329,14 +415,10 @@ export default function Chat() {
     setCurrentSessionId(id);
     // Show local cache immediately, then try Supabase
     setMessages(readMessagesLocal(id));
-    if (userId) {
-      const apiMsgs = await fetchMessagesFromAPI(userId, id);
-      if (apiMsgs && apiMsgs.length > 0 && currentSessionRef.current === id) {
-        setMessages(apiMsgs);
-        // Update local cache
-        localStorage.setItem(msgKey(id), JSON.stringify(apiMsgs));
-      }
-    }
+    setConsultation(null);
+    setConsultationReply("");
+    setConsultationReplyError("");
+    await hydrateSessionDetail(id);
   }
 
   function deleteSession(id) {
@@ -350,6 +432,9 @@ export default function Chat() {
       currentSessionRef.current = null;
       setCurrentSessionId(null);
       setMessages([]);
+      setConsultation(null);
+      setConsultationReply("");
+      setConsultationReplyError("");
     }
     // Delete from Supabase
     if (userId) deleteSessionFromAPI(userId, id);
@@ -359,6 +444,83 @@ export default function Chat() {
     localStorage.removeItem("medmas_token");
     localStorage.removeItem("medmas_user");
     navigate("/login");
+  }
+
+  // ── Consult-a-doctor flow ──────────────────────────────────────────
+  function openConsultConsent(msgId, doctorId = null, doctorName = "") {
+    setConsultMsgId(msgId);
+    setConsultDoctorId(doctorId);
+    setConsultDoctorName(doctorName);
+    setConsultScope(["chat"]);
+    setConsultError("");
+    setConsultCase(null);
+    setConsultStep("consent");
+  }
+
+  function toggleConsultScope(s) {
+    setConsultScope(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
+  }
+
+  async function submitConsultRequest(msg) {
+    setConsultStep("creating");
+    setConsultError("");
+    try {
+      const specialty = msg.symptomResult?.triage?.specialty || "General";
+      const res = await fetch(`${API_BASE}/api/cases`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: currentSessionId,
+          symptoms_summary: msg.symptomResult
+            ? `${msg.symptomResult.symptoms?.join(", ") || ""} — ${msg.symptomResult.triage?.summary || ""}`
+            : msg.text?.slice(0, 300) || "",
+          ai_suggestion: msg.text?.slice(0, 500) || "",
+          triage_level: msg.triage || "routine",
+          specialty_needed: specialty,
+          district: district || user?.district || "",
+          consent_scope: consultScope,
+          doctor_id: consultDoctorId || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to create case");
+      setConsultCase(data.case);
+      setConsultStep("done");
+    } catch (e) {
+      setConsultError(e.message);
+      setConsultStep("consent");
+    }
+  }
+
+  async function sendConsultationReply(e) {
+    e.preventDefault();
+    if (!activeConsultationCase?.id || !consultationReply.trim() || !userId) return;
+
+    setConsultationReplyLoading(true);
+    setConsultationReplyError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/cases/${activeConsultationCase.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          case_id: activeConsultationCase.id,
+          sender_id: userId,
+          sender_type: "patient",
+          message: consultationReply.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to send message.");
+      setConsultationReply("");
+      if (currentSessionId) {
+        await hydrateSessionDetail(currentSessionId);
+      }
+    } catch (err) {
+      setConsultationReplyError(err.message || "Failed to send message.");
+    } finally {
+      setConsultationReplyLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -704,8 +866,30 @@ export default function Chat() {
         crisis: data.crisis_detected, doctors: data.doctor_list,
         lang: data.original_language,
         symptomResult: data.symptom_result || null,
+        registeredDoctors: [],
       };
       setMessages(prev => [...prev, assistantMsg]);
+      setConsultation(mapConsultationPayload(data.consultation));
+      syncSessionMeta(sessionId, {
+        sessionContext: data.session_context || {},
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Fetch MedMAS-registered verified doctors by district (non-blocking)
+      if (data.doctor_list?.length > 0 || data.intent === "doctor" || data.intent === "symptom") {
+        const qs = new URLSearchParams({ verified_only: "true" });
+        if (district || user?.district) qs.set("district", district || user?.district);
+        fetch(`${API_BASE}/api/doctors/list?${qs}`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.doctors?.length > 0) {
+              setMessages(prev => prev.map(m =>
+                m.id === assistantMsg.id ? { ...m, registeredDoctors: d.doctors } : m
+              ));
+            }
+          })
+          .catch(() => {});
+      }
 
       // Persist exchange using the same userMsg object shown in the UI
       persistExchange(sessionId, userMsg, assistantMsg);
@@ -809,6 +993,10 @@ export default function Chat() {
         asha: data.asha_result,
       };
       setMessages(prev => [...prev, assistantMsg]);
+      syncSessionMeta(sessionId, {
+        sessionContext: data.session_context || {},
+        updatedAt: new Date().toISOString(),
+      });
       persistExchange(sessionId, userMsg, assistantMsg);
       await loadAshaQueue();
       await loadAssessmentHistory(selectedPatientId);
@@ -844,7 +1032,13 @@ export default function Chat() {
   }
 
   const agentInfo = activeAgent && Object.values(AGENT_INFO).find(a => activeAgent.includes(a.label));
-  const hasMessages = messages.length > 0;
+  const consultationCases = consultation?.cases || [];
+  const activeConsultationCase = consultation?.latestCase || consultationCases[0] || null;
+  const consultationThread = activeConsultationCase?.messages || [];
+  const doctorMessages = consultationThread.filter(msg => msg.sender_type === "doctor");
+  const consultationPrescriptions = consultation?.prescriptions || [];
+  const canReplyToDoctor = ["accepted", "in_progress"].includes(activeConsultationCase?.status || "");
+  const hasMessages = messages.length > 0 || doctorMessages.length > 0 || consultationPrescriptions.length > 0;
   const agentCount = Object.keys(AGENT_INFO).length;
   const selectedPatient = ashaPatients.find(
     patient => normalizePatientId(patient.id) === normalizePatientId(selectedPatientId)
@@ -1310,6 +1504,169 @@ export default function Chat() {
               </div>
             </div>
           )}
+            {tab === "chat" && activeConsultationCase && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 overflow-hidden rounded-[28px] border border-emerald-200/70 bg-white/85 shadow-[0_18px_60px_rgba(16,185,129,0.10)] backdrop-blur-xl"
+              >
+                <div className="border-b border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 px-5 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-600">
+                        Doctor Updates
+                      </p>
+                      <h3 className="mt-1 text-base font-semibold text-neutral-900">
+                        {activeConsultationCase.specialty_needed || "Consultation"} case in {formatLabel(activeConsultationCase.status)}
+                      </h3>
+                      <p className="mt-1 text-xs text-neutral-500">
+                        {activeConsultationCase.district || district || user?.district || "District pending"}
+                        {" · "}
+                        {consultationCases.length} case{consultationCases.length === 1 ? "" : "s"} linked to this chat
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-200 bg-white/80 px-3 py-2 text-right">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Latest Status</p>
+                      <p className="mt-1 text-sm font-semibold text-emerald-700">{formatLabel(activeConsultationCase.status)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 px-5 py-4 lg:grid-cols-2">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                        Consultation Chat
+                      </p>
+                      <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700">
+                        {consultationThread.length}
+                      </span>
+                    </div>
+                    {consultationThread.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                          {consultationThread.map((message) => {
+                            const isPatient = message.sender_type === "patient";
+                            return (
+                              <div
+                                key={message.id}
+                                className={`flex ${isPatient ? "justify-end" : "justify-start"}`}
+                              >
+                                <div
+                                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                                    isPatient
+                                      ? "bg-indigo-500 text-white"
+                                      : "border border-neutral-200/70 bg-neutral-50/90 text-neutral-800"
+                                  }`}
+                                >
+                                  <div className="mb-1 flex items-center justify-between gap-3">
+                                    <p className={`text-xs font-semibold ${isPatient ? "text-indigo-100" : "text-neutral-800"}`}>
+                                      {isPatient ? "You" : "Doctor"}
+                                    </p>
+                                    <p className={`text-[10px] ${isPatient ? "text-indigo-100/80" : "text-neutral-500"}`}>
+                                      {formatRelativeTime(message.created_at)}
+                                    </p>
+                                  </div>
+                                  <p className="whitespace-pre-wrap text-sm">{message.message}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {canReplyToDoctor ? (
+                          <form onSubmit={sendConsultationReply} className="space-y-2 rounded-2xl border border-neutral-200/70 bg-white/70 p-3">
+                            <textarea
+                              value={consultationReply}
+                              onChange={(e) => setConsultationReply(e.target.value)}
+                              rows={3}
+                              placeholder="Reply to your doctor..."
+                              className="w-full resize-none rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 outline-none transition focus:border-emerald-400"
+                            />
+                            {consultationReplyError && (
+                              <p className="text-xs text-red-500">{consultationReplyError}</p>
+                            )}
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-[11px] text-neutral-500">
+                                Your message will be sent to the doctor on this case.
+                              </p>
+                              <button
+                                type="submit"
+                                disabled={consultationReplyLoading || !consultationReply.trim()}
+                                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {consultationReplyLoading ? "Sending..." : "Send"}
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-4 text-sm text-neutral-500">
+                            Replies are available while the consultation is active.
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-5 text-sm text-neutral-500">
+                        No consultation messages yet for this case.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                        Prescriptions
+                      </p>
+                      <span className="rounded-full bg-sky-50 px-2 py-1 text-[10px] font-medium text-sky-700">
+                        {consultationPrescriptions.length}
+                      </span>
+                    </div>
+                    {consultationPrescriptions.length > 0 ? (
+                      <div className="space-y-2">
+                        {consultationPrescriptions.slice(0, 3).map((rx) => (
+                          <div key={rx.id} className="rounded-2xl border border-sky-200/70 bg-sky-50/80 px-4 py-3">
+                            <div className="mb-2 flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-semibold text-sky-900">
+                                  {rx.diagnosis || "Prescription"}
+                                </p>
+                                <p className="mt-1 text-[10px] text-sky-700">
+                                  {formatRelativeTime(rx.created_at)}
+                                </p>
+                              </div>
+                              {rx.follow_up_date && (
+                                <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-medium text-sky-700">
+                                  Follow-up {rx.follow_up_date}
+                                </span>
+                              )}
+                            </div>
+                            {rx.medications?.length > 0 && (
+                              <div className="space-y-1.5">
+                                {rx.medications.map((med, index) => (
+                                  <p key={`${rx.id}-${index}`} className="text-[12px] text-neutral-700">
+                                    <span className="font-semibold text-neutral-900">{med.name}</span>
+                                    {med.dosage ? ` · ${med.dosage}` : ""}
+                                    {med.frequency ? ` · ${med.frequency}` : ""}
+                                    {med.duration ? ` · ${med.duration}` : ""}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                            {rx.instructions && (
+                              <p className="mt-2 text-[12px] text-neutral-600">{rx.instructions}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-5 text-sm text-neutral-500">
+                        No prescription has been issued yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
             {/* Empty state */}
             <AnimatePresence>
               {!hasMessages && (
@@ -1667,6 +2024,103 @@ export default function Chat() {
                               </div>
                             );
                           })}
+
+                        </div>
+                      )}
+
+                      {/* ── MedMAS Registered Doctors (separate section) ── */}
+                      {msg.registeredDoctors?.length > 0 && (
+                        <div className="mt-3 space-y-2 border-t border-indigo-100/60 pt-3 dark:border-indigo-500/10">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-500 dark:text-indigo-400">
+                            MedMAS Doctors — Book Online Consultation
+                          </p>
+                          {msg.registeredDoctors.map((d) => {
+                            const isThisConsulting = consultMsgId === msg.id && consultDoctorId === d.id;
+                            return (
+                              <div key={d.id} className="overflow-hidden rounded-xl border border-indigo-200/50 bg-indigo-50/60 backdrop-blur-sm dark:border-indigo-500/20 dark:bg-indigo-500/5">
+                                {/* Doctor info row */}
+                                <div className="flex items-center gap-3 px-4 py-3">
+                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-xs font-bold text-white shadow-sm">
+                                    {(d.name || "D")[0]}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{d.name}</p>
+                                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
+                                        {d.specialty}
+                                      </span>
+                                      {d.district && (
+                                        <span className="text-[10px] text-neutral-400">{d.district}</span>
+                                      )}
+                                      {d.bio && (
+                                        <span className="text-[10px] text-neutral-400 truncate max-w-[180px]">{d.bio}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* Consult button — only show if no active consult for this doctor */}
+                                  {!isThisConsulting && consultStep !== "done" && (
+                                    <button
+                                      onClick={() => openConsultConsent(msg.id, d.id, d.name)}
+                                      className="shrink-0 rounded-lg bg-indigo-500 px-3 py-1.5 text-[10px] font-semibold text-white transition hover:bg-indigo-600"
+                                    >
+                                      Consult
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Inline consent for this specific doctor */}
+                                {isThisConsulting && consultStep === "consent" && (
+                                  <div className="border-t border-indigo-100/60 px-4 pb-3 pt-2 dark:border-indigo-500/10">
+                                    <p className="mb-2 text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
+                                      Share with Dr. {consultDoctorName}:
+                                    </p>
+                                    <div className="mb-2 space-y-1">
+                                      {[
+                                        { key: "chat", label: "Chat history & symptoms" },
+                                        { key: "reports", label: "Lab reports & documents" },
+                                        { key: "contact", label: "Contact information" },
+                                      ].map(({ key, label }) => (
+                                        <label key={key} className="flex items-center gap-2 text-[11px] text-neutral-600 dark:text-neutral-300 cursor-pointer">
+                                          <input type="checkbox" checked={consultScope.includes(key)} onChange={() => toggleConsultScope(key)} className="rounded" />
+                                          {label}
+                                        </label>
+                                      ))}
+                                    </div>
+                                    {consultError && <p className="mb-1 text-[10px] text-red-500">{consultError}</p>}
+                                    <div className="flex gap-2">
+                                      <button onClick={() => submitConsultRequest(msg)} disabled={!consultScope.length}
+                                        className="flex-1 rounded-lg bg-indigo-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-600 disabled:opacity-40 transition">
+                                        Confirm & Request
+                                      </button>
+                                      <button onClick={() => { setConsultStep("idle"); setConsultMsgId(null); setConsultDoctorId(null); }}
+                                        className="rounded-lg px-3 py-1.5 text-[11px] text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition">
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {isThisConsulting && consultStep === "creating" && (
+                                  <div className="border-t border-indigo-100/60 px-4 pb-3 pt-2 flex items-center gap-2 dark:border-indigo-500/10">
+                                    <span className="auth-spinner" />
+                                    <span className="text-[11px] text-indigo-500">Sending request to Dr. {consultDoctorName}...</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+
+                          {/* Success banner after any consult is confirmed */}
+                          {consultMsgId === msg.id && consultStep === "done" && consultCase && (
+                            <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/80 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+                              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                                Consultation sent to Dr. {consultDoctorName}
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
+                                Dr. {consultDoctorName} will review your case and respond. You'll see their reply here.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

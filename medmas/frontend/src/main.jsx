@@ -6,6 +6,9 @@ import Login from "./pages/Login.jsx";
 import Signup from "./pages/Signup.jsx";
 import Chat from "./pages/Chat.jsx";
 import LandingPage from "./pages/LandingPage.jsx";
+import DoctorSignup from "./pages/DoctorSignup.jsx";
+import DoctorLogin from "./pages/DoctorLogin.jsx";
+import DoctorDashboard from "./pages/DoctorDashboard.jsx";
 import "./index.css";
 
 function ProtectedRoute({ children }) {
@@ -16,7 +19,18 @@ function ProtectedRoute({ children }) {
 
 function GuestRoute({ children }) {
   const token = localStorage.getItem("medmas_token");
-  if (token) return <Navigate to="/chat" replace />;
+  if (token) {
+    const user = JSON.parse(localStorage.getItem("medmas_user") || "{}");
+    if (user.role === "doctor") return <Navigate to="/doctor/dashboard" replace />;
+    return <Navigate to="/chat" replace />;
+  }
+  return children;
+}
+
+function DoctorRoute({ children }) {
+  const token = localStorage.getItem("medmas_token");
+  const doctor = localStorage.getItem("medmas_doctor");
+  if (!token || !doctor) return <Navigate to="/doctor/login" replace />;
   return children;
 }
 
@@ -47,6 +61,17 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <ProtectedRoute>
               <Chat />
             </ProtectedRoute>
+          }
+        />
+        {/* Doctor routes */}
+        <Route path="/doctor/signup" element={<DoctorSignup />} />
+        <Route path="/doctor/login" element={<DoctorLogin />} />
+        <Route
+          path="/doctor/dashboard"
+          element={
+            <DoctorRoute>
+              <DoctorDashboard />
+            </DoctorRoute>
           }
         />
         <Route path="*" element={<Navigate to="/" replace />} />
