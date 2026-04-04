@@ -43,6 +43,10 @@ function makeTitle(text) {
   return (text || "New Chat").trim().slice(0, 52) || "New Chat";
 }
 
+function getSessionContext(sessions, sessionId) {
+  return sessions.find((session) => session.id === sessionId)?.sessionContext || {};
+}
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const AGENT_INFO = {
@@ -527,7 +531,7 @@ export default function Chat() {
     return currentMessages
       .filter(m => m.text?.trim())
       .slice(-limit)
-      .map(m => ({ role: m.role, content: m.text }));
+      .map(m => ({ role: m.role, content: m.text, intent: m.intent || null }));
   }
 
   async function sendMessage(text, files = []) {
@@ -560,6 +564,7 @@ export default function Chat() {
         tab,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        sessionContext: {},
       };
       currentSessionRef.current = sessionId;
       setCurrentSessionId(sessionId);
@@ -576,12 +581,15 @@ export default function Chat() {
 
     try {
       let res;
+      const sessionContext = getSessionContext(sessions, sessionId);
       if (files.length > 0) {
         const formData = new FormData();
         formData.append("message", text || "");
         if (district) formData.append("user_district", district);
         if (userCoords?.lat) formData.append("user_lat", String(userCoords.lat));
         if (userCoords?.lng) formData.append("user_lng", String(userCoords.lng));
+        formData.append("chat_history", JSON.stringify(chatHistory));
+        formData.append("session_context", JSON.stringify(sessionContext));
         files.forEach((f) => formData.append("files", f));
         res = await fetch(`${API_BASE}/api/chat/upload`, { method: "POST", body: formData });
       } else {
@@ -593,6 +601,7 @@ export default function Chat() {
             user_district: district,
             user_lat: userCoords?.lat,
             user_lng: userCoords?.lng,
+            session_context: sessionContext,
             chat_history: chatHistory,
           }),
         });
@@ -670,6 +679,7 @@ export default function Chat() {
         tab: "asha",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        sessionContext: {},
       };
       currentSessionRef.current = sessionId;
       setCurrentSessionId(sessionId);
@@ -690,6 +700,7 @@ export default function Chat() {
     setActiveAgent("ASHA Copilot");
 
     try {
+      const sessionContext = getSessionContext(sessions, sessionId);
       const res = await fetch(`${API_BASE}/api/asha/assess`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -697,6 +708,7 @@ export default function Chat() {
           asha_worker_id: ashaWorkerId,
           patient_id: selectedPatientId,
           observations: text, user_district: district, user_lat: userCoords?.lat, user_lng: userCoords?.lng,
+          session_context: sessionContext,
           chat_history: chatHistory,
         }),
       });
@@ -1507,6 +1519,9 @@ export default function Chat() {
                         </div>
                       )}
 
+                      </div>
+                    )}
+
                       {/* Doctor cards */}
                       {msg.doctors?.length > 0 && (
                         <div className="mt-3 space-y-2 border-t border-neutral-200/40 pt-3 dark:border-neutral-700/40">
@@ -1552,8 +1567,6 @@ export default function Chat() {
                           })}
                         </div>
                       )}
-                      </div>
-                    )}
                     </div>
                     </div>
 

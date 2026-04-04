@@ -19,6 +19,12 @@ from services.asha_service import (
     get_assessment_history,
     get_selected_patient_id, set_selected_patient_id,
 )
+from services.chat_history import (
+    list_chat_sessions,
+    get_chat_session,
+    save_chat_exchange,
+    delete_chat_session,
+)
 from config import (
     supabase,
     supabase_db,
@@ -34,6 +40,63 @@ import pandas as pd
 
 # In-memory OTP store: {phone: {"otp": "123456", "expires_at": timestamp}}
 _otp_store: dict = {}
+
+
+def _parse_json_field(raw: Optional[str], default):
+    if not raw:
+        return default
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return default
+    return value if isinstance(value, type(default)) else default
+
+
+def _build_assistant_meta(result: dict, *, is_asha: bool = False) -> dict:
+    meta = {
+        "triage": result.get("triage_level", "routine"),
+        "intent": "asha" if is_asha else result.get("intent", ""),
+        "crisis": result.get("crisis_detected", False),
+        "doctors": result.get("doctor_list") or [],
+    }
+    if result.get("input_lang"):
+        meta["lang"] = result.get("input_lang")
+    if result.get("symptom_result"):
+        meta["symptomResult"] = result.get("symptom_result")
+    if result.get("asha_result"):
+        meta["asha"] = result.get("asha_result")
+    return meta
+
+
+def _persist_chat_turn(
+    *,
+    user_id: Optional[str],
+    session_id: Optional[str],
+    session_title: Optional[str],
+    session_tab: Optional[str],
+    session_context: Optional[dict],
+    user_content: str,
+    user_meta: Optional[dict],
+    assistant_content: str,
+    assistant_meta: dict,
+) -> None:
+    if not supabase or not user_id or not session_id:
+        return
+    save_chat_exchange(
+        user_id=user_id,
+        session_id=session_id,
+        title=session_title or "New Chat",
+        tab=session_tab or "chat",
+        session_context=session_context or {},
+        user_message={
+            "content": user_content or "",
+            "meta": user_meta or {},
+        },
+        assistant_message={
+            "content": assistant_content or "",
+            "meta": assistant_meta or {},
+        },
+    )
 
 
 def _sync_public_user(
@@ -80,10 +143,14 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message:       str
     user_id:       Optional[str] = None
+    session_id:    Optional[str] = None
+    session_title: Optional[str] = None
+    session_tab:   Optional[str] = "chat"
     user_district: Optional[str] = None
     user_phone:    Optional[str] = None
     user_lat:      Optional[float] = None
     user_lng:      Optional[float] = None
+    session_context: Optional[dict] = None
     chat_history:  List[dict] = []
 
 class ChatResponse(BaseModel):
@@ -95,6 +162,7 @@ class ChatResponse(BaseModel):
     health_score:      Optional[int] = None
     crisis_detected:   bool = False
     symptom_result:    Optional[dict] = None
+    session_context:   dict = {}
 
 
 class TranscriptionResponse(BaseModel):
@@ -117,6 +185,7 @@ async def chat(req: ChatRequest):
             user_phone=req.user_phone,
             user_lat=req.user_lat,
             user_lng=req.user_lng,
+            session_context=req.session_context or {},
             session_history=req.chat_history,
         )
     except AuthenticationError:
@@ -148,6 +217,21 @@ async def chat(req: ChatRequest):
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+    try:
+        _persist_chat_turn(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            session_title=req.session_title,
+            session_tab=req.session_tab,
+            session_context=result.get("session_context", {}),
+            user_content=req.message,
+            user_meta={},
+            assistant_content=result.get("final_response", ""),
+            assistant_meta=_build_assistant_meta(result),
+        )
+    except Exception:
+        pass
+
     return ChatResponse(
         response=result.get("final_response", ""),
         original_language=result.get("input_lang", "en"),
@@ -157,6 +241,7 @@ async def chat(req: ChatRequest):
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
+        session_context=result.get("session_context", {}),
     )
 
 @app.post("/api/chat/upload")
@@ -164,20 +249,33 @@ async def chat_upload(
     files:         List[UploadFile] = File(...),
     message:       str              = Form(""),
     user_id:       str              = Form(None),
+    session_id:    str              = Form(None),
+    session_title: str              = Form(None),
+    session_tab:   str              = Form("chat"),
     user_district: str              = Form(None),
     user_phone:    str              = Form(None),
     user_lat:      float            = Form(None),
     user_lng:      float            = Form(None),
+    chat_history:  str              = Form("[]"),
+    session_context: str            = Form("{}"),
 ):
     """Chat endpoint that accepts file attachments (images + documents)."""
     from services.image_parser import extract_text_from_image
 
     extracted_parts = []
     pdf_bytes_combined = None
+    uploaded_files_meta = []
 
     for f in files:
         content = await f.read()
         ctype = f.content_type or ""
+        uploaded_files_meta.append(
+            {
+                "name": f.filename,
+                "type": "image" if ctype.startswith("image/") else "document",
+                "url": None,
+            }
+        )
 
         if ctype.startswith("image/"):
             # Use vision model to extract text/findings from the image
@@ -199,6 +297,8 @@ async def chat_upload(
         enriched = enriched + "\n\n" + "\n\n".join(extracted_parts)
 
     media_type = "pdf" if pdf_bytes_combined else "text"
+    parsed_history = _parse_json_field(chat_history, [])
+    parsed_context = _parse_json_field(session_context, {})
 
     try:
         result = await run_pipeline(
@@ -210,6 +310,8 @@ async def chat_upload(
             user_phone=user_phone,
             user_lat=user_lat,
             user_lng=user_lng,
+            session_context=parsed_context,
+            session_history=parsed_history,
         )
     except AuthenticationError:
         raise HTTPException(401, "DeepInfra authentication failed.")
@@ -220,6 +322,21 @@ async def chat_upload(
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+    try:
+        _persist_chat_turn(
+            user_id=user_id,
+            session_id=session_id,
+            session_title=session_title,
+            session_tab=session_tab,
+            session_context=result.get("session_context", {}),
+            user_content=message or "[Uploaded files]",
+            user_meta={"files": uploaded_files_meta} if uploaded_files_meta else {},
+            assistant_content=result.get("final_response", ""),
+            assistant_meta=_build_assistant_meta(result),
+        )
+    except Exception:
+        pass
+
     return ChatResponse(
         response=result.get("final_response", ""),
         original_language=result.get("input_lang", "en"),
@@ -229,6 +346,7 @@ async def chat_upload(
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
+        session_context=result.get("session_context", {}),
     )
 
 @app.post("/api/upload-lab")
@@ -572,6 +690,45 @@ def set_reminder(req: ReminderRequest):
     schedule_reminder(req.phone, req.message, req.days_from_now)
     return {"scheduled": True, "message": req.message, "days_from_now": req.days_from_now}
 
+@app.get("/api/chat/sessions/{user_id}")
+def get_chat_sessions(user_id: str):
+    if not supabase:
+        raise HTTPException(503, "Supabase not configured")
+    try:
+        return {"sessions": list_chat_sessions(user_id)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/api/chat/sessions/{user_id}/{session_id}")
+def get_chat_session_detail(user_id: str, session_id: str):
+    if not supabase:
+        raise HTTPException(503, "Supabase not configured")
+    try:
+        payload = get_chat_session(user_id, session_id)
+        if not payload.get("session"):
+            raise HTTPException(404, "Chat session not found")
+        return payload
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.delete("/api/chat/sessions/{user_id}/{session_id}")
+def remove_chat_session(user_id: str, session_id: str):
+    if not supabase:
+        raise HTTPException(503, "Supabase not configured")
+    try:
+        delete_chat_session(user_id, session_id)
+        return {"deleted": True}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.get("/api/history/{user_id}")
 def get_history(user_id: str, limit: int = 20):
     """Retrieve past health logs for a user from Supabase."""
@@ -595,9 +752,14 @@ class ASHAAssessRequest(BaseModel):
     asha_worker_id: str
     patient_id:     str
     observations:   str
+    user_id:        Optional[str] = None
+    session_id:     Optional[str] = None
+    session_title:  Optional[str] = None
+    session_tab:    Optional[str] = "asha"
     user_district:  Optional[str] = None
     user_lat:       Optional[float] = None
     user_lng:       Optional[float] = None
+    session_context: Optional[dict] = None
     chat_history:   List[dict] = []
 
 class AddPatientRequest(BaseModel):
@@ -678,9 +840,11 @@ async def asha_assess(req: ASHAAssessRequest):
     state = initial_state(
         raw_input=req.observations,
         media_type="text",
+        user_id=req.user_id,
         user_district=req.user_district,
         user_lat=req.user_lat,
         user_lng=req.user_lng,
+        session_context=req.session_context or {},
         session_history=req.chat_history,
     )
     state["asha_mode"]       = True
@@ -705,6 +869,21 @@ async def asha_assess(req: ASHAAssessRequest):
                 update_patient_status(req.patient_id, "referred")
         except Exception:
             pass  # Non-blocking — Supabase save is optional
+
+    try:
+        _persist_chat_turn(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            session_title=req.session_title,
+            session_tab=req.session_tab,
+            session_context=result.get("session_context", {}),
+            user_content=f"[ASHA] {req.observations}",
+            user_meta={},
+            assistant_content=result.get("final_response", ""),
+            assistant_meta=_build_assistant_meta(result, is_asha=True),
+        )
+    except Exception:
+        pass
 
     return {
         "asha_result":     result.get("asha_result"),

@@ -66,6 +66,8 @@ def create_embeddings() -> OpenAIEmbeddings:
         model=_resolve_embedding_model(EMBEDDING_MODEL),
         api_key=DEEPINFRA_API_KEY,
         base_url=DEEPINFRA_BASE_URL,
+        tiktoken_enabled=False,  # DeepInfra expects raw strings, not token IDs
+        check_embedding_ctx_length=False,
     )
 
 
