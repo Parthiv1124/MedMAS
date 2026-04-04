@@ -91,7 +91,29 @@ def _parse_json_field(raw: Optional[str], default):
     return value if isinstance(value, type(default)) else default
 
 
+<<<<<<< Updated upstream
 def _build_assistant_meta(result: dict, *, is_asha: bool = False) -> dict:
+=======
+def _get_registered_doctors(result: dict, district: Optional[str]) -> list:
+    specialty = (
+        (result.get("symptom_result") or {}).get("recommended_specialty")
+        or ((result.get("symptom_result") or {}).get("triage") or {}).get("specialty")
+        or ""
+    )
+    if specialty:
+        doctors = match_doctors(specialty=specialty, district=district or "", limit=5)
+        if doctors:
+            return doctors
+    return list_doctors(district=district or "", verified_only=True)[:5]
+
+
+def _build_assistant_meta(
+    result: dict,
+    *,
+    is_asha: bool = False,
+    registered_doctors: Optional[list] = None,
+) -> dict:
+>>>>>>> Stashed changes
     meta = {
         "triage": result.get("triage_level", "routine"),
         "intent": "asha" if is_asha else result.get("intent", ""),
@@ -104,6 +126,11 @@ def _build_assistant_meta(result: dict, *, is_asha: bool = False) -> dict:
         meta["symptomResult"] = result.get("symptom_result")
     if result.get("asha_result"):
         meta["asha"] = result.get("asha_result")
+<<<<<<< Updated upstream
+=======
+    if registered_doctors:
+        meta["registeredDoctors"] = registered_doctors
+>>>>>>> Stashed changes
     return meta
 
 
@@ -256,6 +283,10 @@ class ChatResponse(BaseModel):
     triage_level:      str
     intent:            str
     doctor_list:       list = []
+<<<<<<< Updated upstream
+=======
+    registered_doctors: list = []
+>>>>>>> Stashed changes
     health_score:      Optional[int] = None
     crisis_detected:   bool = False
     symptom_result:    Optional[dict] = None
@@ -317,6 +348,15 @@ async def chat(req: ChatRequest):
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+<<<<<<< Updated upstream
+=======
+    registered_doctors = []
+    try:
+        registered_doctors = _get_registered_doctors(result, req.user_district)
+    except Exception:
+        pass
+
+>>>>>>> Stashed changes
     try:
         _persist_chat_turn(
             user_id=req.user_id,
@@ -327,7 +367,11 @@ async def chat(req: ChatRequest):
             user_content=req.message,
             user_meta={},
             assistant_content=result.get("final_response", ""),
+<<<<<<< Updated upstream
             assistant_meta=_build_assistant_meta(result),
+=======
+            assistant_meta=_build_assistant_meta(result, registered_doctors=registered_doctors),
+>>>>>>> Stashed changes
         )
     except Exception:
         pass
@@ -344,6 +388,10 @@ async def chat(req: ChatRequest):
         triage_level=result.get("triage_level", "routine"),
         intent=result.get("intent", ""),
         doctor_list=result.get("doctor_list") or [],
+<<<<<<< Updated upstream
+=======
+        registered_doctors=registered_doctors,
+>>>>>>> Stashed changes
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
@@ -436,6 +484,15 @@ async def chat_upload(
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+<<<<<<< Updated upstream
+=======
+    registered_doctors = []
+    try:
+        registered_doctors = _get_registered_doctors(result, user_district)
+    except Exception:
+        pass
+
+>>>>>>> Stashed changes
     try:
         _persist_chat_turn(
             user_id=user_id,
@@ -446,7 +503,11 @@ async def chat_upload(
             user_content=message or "[Uploaded files]",
             user_meta={"files": uploaded_files_meta} if uploaded_files_meta else {},
             assistant_content=result.get("final_response", ""),
+<<<<<<< Updated upstream
             assistant_meta=_build_assistant_meta(result),
+=======
+            assistant_meta=_build_assistant_meta(result, registered_doctors=registered_doctors),
+>>>>>>> Stashed changes
         )
     except Exception:
         pass
@@ -463,6 +524,10 @@ async def chat_upload(
         triage_level=result.get("triage_level", "routine"),
         intent=result.get("intent", ""),
         doctor_list=result.get("doctor_list") or [],
+<<<<<<< Updated upstream
+=======
+        registered_doctors=registered_doctors,
+>>>>>>> Stashed changes
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),

@@ -71,6 +71,10 @@ function mapApiMessage(m) {
     lang: meta.lang || undefined,
     symptomResult: meta.symptomResult || undefined,
     asha: meta.asha || undefined,
+<<<<<<< Updated upstream
+=======
+    registeredDoctors: meta.registeredDoctors || [],
+>>>>>>> Stashed changes
   };
 }
 
@@ -866,7 +870,11 @@ export default function Chat() {
         crisis: data.crisis_detected, doctors: data.doctor_list,
         lang: data.original_language,
         symptomResult: data.symptom_result || null,
+<<<<<<< Updated upstream
         registeredDoctors: [],
+=======
+        registeredDoctors: data.registered_doctors || [],
+>>>>>>> Stashed changes
       };
       setMessages(prev => [...prev, assistantMsg]);
       setConsultation(mapConsultationPayload(data.consultation));
@@ -875,6 +883,7 @@ export default function Chat() {
         updatedAt: new Date().toISOString(),
       });
 
+<<<<<<< Updated upstream
       // Fetch MedMAS-registered verified doctors by district (non-blocking)
       if (data.doctor_list?.length > 0 || data.intent === "doctor" || data.intent === "symptom") {
         const qs = new URLSearchParams({ verified_only: "true" });
@@ -891,6 +900,8 @@ export default function Chat() {
           .catch(() => {});
       }
 
+=======
+>>>>>>> Stashed changes
       // Persist exchange using the same userMsg object shown in the UI
       persistExchange(sessionId, userMsg, assistantMsg);
     } catch (err) {
@@ -2031,19 +2042,28 @@ export default function Chat() {
                       {/* ── MedMAS Registered Doctors (separate section) ── */}
                       {msg.registeredDoctors?.length > 0 && (
                         <div className="mt-3 space-y-2 border-t border-indigo-100/60 pt-3 dark:border-indigo-500/10">
+<<<<<<< Updated upstream
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-500 dark:text-indigo-400">
+=======
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+>>>>>>> Stashed changes
                             MedMAS Doctors — Book Online Consultation
                           </p>
                           {msg.registeredDoctors.map((d) => {
                             const isThisConsulting = consultMsgId === msg.id && consultDoctorId === d.id;
                             return (
+<<<<<<< Updated upstream
                               <div key={d.id} className="overflow-hidden rounded-xl border border-indigo-200/50 bg-indigo-50/60 backdrop-blur-sm dark:border-indigo-500/20 dark:bg-indigo-500/5">
+=======
+                              <div key={d.id} className="overflow-hidden rounded-xl border border-indigo-200/50 bg-indigo-50/60 text-neutral-900 backdrop-blur-sm dark:border-indigo-500/20 dark:bg-indigo-500/5">
+>>>>>>> Stashed changes
                                 {/* Doctor info row */}
                                 <div className="flex items-center gap-3 px-4 py-3">
                                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-xs font-bold text-white shadow-sm">
                                     {(d.name || "D")[0]}
                                   </div>
                                   <div className="min-w-0 flex-1">
+<<<<<<< Updated upstream
                                     <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{d.name}</p>
                                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                       <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
@@ -2054,6 +2074,18 @@ export default function Chat() {
                                       )}
                                       {d.bio && (
                                         <span className="text-[10px] text-neutral-400 truncate max-w-[180px]">{d.bio}</span>
+=======
+                                    <p className="truncate text-sm font-semibold text-neutral-900">{d.name}</p>
+                                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                                        {d.specialty}
+                                      </span>
+                                      {d.district && (
+                                        <span className="text-[10px] text-neutral-600">{d.district}</span>
+                                      )}
+                                      {d.bio && (
+                                        <span className="text-[10px] text-neutral-600 truncate max-w-[180px]">{d.bio}</span>
+>>>>>>> Stashed changes
                                       )}
                                     </div>
                                   </div>
@@ -2061,7 +2093,11 @@ export default function Chat() {
                                   {!isThisConsulting && consultStep !== "done" && (
                                     <button
                                       onClick={() => openConsultConsent(msg.id, d.id, d.name)}
+<<<<<<< Updated upstream
                                       className="shrink-0 rounded-lg bg-indigo-500 px-3 py-1.5 text-[10px] font-semibold text-white transition hover:bg-indigo-600"
+=======
+                                      className="shrink-0 rounded-lg bg-indigo-200 px-3 py-1.5 text-[10px] font-semibold text-neutral-950 transition hover:bg-indigo-300"
+>>>>>>> Stashed changes
                                     >
                                       Consult
                                     </button>
@@ -2071,7 +2107,11 @@ export default function Chat() {
                                 {/* Inline consent for this specific doctor */}
                                 {isThisConsulting && consultStep === "consent" && (
                                   <div className="border-t border-indigo-100/60 px-4 pb-3 pt-2 dark:border-indigo-500/10">
+<<<<<<< Updated upstream
                                     <p className="mb-2 text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
+=======
+                                    <p className="mb-2 text-[11px] font-medium text-neutral-800">
+>>>>>>> Stashed changes
                                       Share with Dr. {consultDoctorName}:
                                     </p>
                                     <div className="mb-2 space-y-1">
@@ -2080,7 +2120,11 @@ export default function Chat() {
                                         { key: "reports", label: "Lab reports & documents" },
                                         { key: "contact", label: "Contact information" },
                                       ].map(({ key, label }) => (
+<<<<<<< Updated upstream
                                         <label key={key} className="flex items-center gap-2 text-[11px] text-neutral-600 dark:text-neutral-300 cursor-pointer">
+=======
+                                        <label key={key} className="flex items-center gap-2 text-[11px] text-neutral-800 cursor-pointer">
+>>>>>>> Stashed changes
                                           <input type="checkbox" checked={consultScope.includes(key)} onChange={() => toggleConsultScope(key)} className="rounded" />
                                           {label}
                                         </label>
@@ -2089,11 +2133,19 @@ export default function Chat() {
                                     {consultError && <p className="mb-1 text-[10px] text-red-500">{consultError}</p>}
                                     <div className="flex gap-2">
                                       <button onClick={() => submitConsultRequest(msg)} disabled={!consultScope.length}
+<<<<<<< Updated upstream
                                         className="flex-1 rounded-lg bg-indigo-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-600 disabled:opacity-40 transition">
                                         Confirm & Request
                                       </button>
                                       <button onClick={() => { setConsultStep("idle"); setConsultMsgId(null); setConsultDoctorId(null); }}
                                         className="rounded-lg px-3 py-1.5 text-[11px] text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition">
+=======
+                                        className="flex-1 rounded-lg bg-indigo-200 px-3 py-1.5 text-[11px] font-semibold text-neutral-950 hover:bg-indigo-300 disabled:opacity-40 transition">
+                                        Confirm & Request
+                                      </button>
+                                      <button onClick={() => { setConsultStep("idle"); setConsultMsgId(null); setConsultDoctorId(null); }}
+                                        className="rounded-lg px-3 py-1.5 text-[11px] text-neutral-700 hover:text-neutral-900 transition">
+>>>>>>> Stashed changes
                                         Cancel
                                       </button>
                                     </div>
@@ -2103,7 +2155,11 @@ export default function Chat() {
                                 {isThisConsulting && consultStep === "creating" && (
                                   <div className="border-t border-indigo-100/60 px-4 pb-3 pt-2 flex items-center gap-2 dark:border-indigo-500/10">
                                     <span className="auth-spinner" />
+<<<<<<< Updated upstream
                                     <span className="text-[11px] text-indigo-500">Sending request to Dr. {consultDoctorName}...</span>
+=======
+                                    <span className="text-[11px] text-neutral-800">Sending request to Dr. {consultDoctorName}...</span>
+>>>>>>> Stashed changes
                                   </div>
                                 )}
                               </div>
@@ -2113,10 +2169,17 @@ export default function Chat() {
                           {/* Success banner after any consult is confirmed */}
                           {consultMsgId === msg.id && consultStep === "done" && consultCase && (
                             <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/80 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+<<<<<<< Updated upstream
                               <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                                 Consultation sent to Dr. {consultDoctorName}
                               </p>
                               <p className="mt-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
+=======
+                              <p className="text-xs font-semibold text-emerald-800">
+                                Consultation sent to Dr. {consultDoctorName}
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-neutral-700">
+>>>>>>> Stashed changes
                                 Dr. {consultDoctorName} will review your case and respond. You'll see their reply here.
                               </p>
                             </div>
