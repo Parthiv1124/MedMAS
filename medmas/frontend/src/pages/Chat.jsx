@@ -67,25 +67,6 @@ const TAB_STYLES = {
   },
 };
 
-const TAB_META = {
-  chat: {
-    badge: "Patient Care",
-    title: "Clinical Assistant",
-    description: "Symptom triage, doctor discovery, and clear next-step guidance in one conversation.",
-    icon: "\uD83E\uDE7A",
-    accent: "from-sky-500/20 via-cyan-400/12 to-white/0",
-    badgeClass: "border-sky-200 bg-sky-50 text-sky-700",
-  },
-  asha: {
-    badge: "Field Workflow",
-    title: "ASHA Field Desk",
-    description: "Queue-based patient assessment for village outreach, escalation, and follow-up.",
-    icon: "\uD83D\uDC69\u200D\u2695\uFE0F",
-    accent: "from-amber-500/20 via-yellow-400/14 to-white/0",
-    badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
-  },
-};
-
 const TRIAGE = {
   urgent: { bg: "bg-red-500/10", text: "text-red-400", border: "border-red-500/20", dot: "bg-red-500" },
   moderate: { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20", dot: "bg-amber-500" },
@@ -689,7 +670,6 @@ export default function Chat() {
   }
 
   const agentInfo = activeAgent && Object.values(AGENT_INFO).find(a => activeAgent.includes(a.label));
-  const modeMeta = TAB_META[tab];
   const hasMessages = messages.length > 0;
   const agentCount = Object.keys(AGENT_INFO).length;
   const selectedPatient = ashaPatients.find(
@@ -802,41 +782,6 @@ export default function Chat() {
               </div>
             </div>
 
-            <div className={`glass-liquid overflow-hidden rounded-[28px] border border-white/55 bg-gradient-to-br ${modeMeta.accent} p-4 sm:p-[18px]`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div className="min-w-0">
-                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] ${modeMeta.badgeClass}`}>
-                    <span>{modeMeta.icon}</span>
-                    {modeMeta.badge}
-                  </span>
-                  <h2 className="mt-3 text-xl font-semibold tracking-tight text-neutral-950 sm:text-2xl">
-                    {modeMeta.title}
-                  </h2>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
-                    {modeMeta.description}
-                  </p>
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[360px]">
-                  <div className="rounded-2xl border border-white/60 bg-white/65 px-3 py-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">District</p>
-                    <p className="mt-1 text-sm font-semibold text-neutral-900">{district || "Selecting..."}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/60 bg-white/65 px-3 py-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">Mode Status</p>
-                    <p className="mt-1 text-sm font-semibold text-neutral-900">
-                      {tab === "asha"
-                        ? (selectedPatient ? "Patient linked" : "Waiting for patient")
-                        : (hasMessages ? "Conversation active" : "Ready")}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/60 bg-white/65 px-3 py-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">AI Agents</p>
-                    <p className="mt-1 text-sm font-semibold text-neutral-900">{agentCount} online</p>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </header>
 
