@@ -1593,7 +1593,7 @@ export default function Chat() {
                               {(d.name || "D")[0]}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-semibold text-neutral-900">{d.name}</p>
+                              <p className="truncate text-sm font-semibold !text-neutral-900">{d.name}</p>
                               <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                 <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
                                   {d.specialty}
@@ -2178,7 +2178,7 @@ export default function Chat() {
                                     {(d.name || "D")[0]}
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{d.name}</p>
+                                    <p className="truncate text-sm font-semibold !text-neutral-900">{d.name}</p>
                                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                       {specialtyLabel && (
                                         <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium capitalize text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
@@ -2238,7 +2238,7 @@ export default function Chat() {
                                     {(d.name || "D")[0]}
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{d.name}</p>
+                                    <p className="truncate text-sm font-semibold !text-neutral-900">{d.name}</p>
                                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                       <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
                                         {d.specialty}
