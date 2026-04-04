@@ -4,4 +4,5 @@ medmas/backend/.venv/
 medmas/frontend/dist/
 medmas/backend/__pycache__/
 medmas/backend/**/*.pyc
+medmas/.claude/
 node_modules/
