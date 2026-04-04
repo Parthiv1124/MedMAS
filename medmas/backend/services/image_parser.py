@@ -1,9 +1,7 @@
 # backend/services/image_parser.py
 import base64
-from config import openai_client
+from config import openai_client, VLM_MODEL
 
-
-VISION_MODEL = "meta-llama/Llama-3.2-11B-Vision-Instruct"
 
 SYSTEM_PROMPT = (
     "You are a medical document reader. Extract ALL text, numbers, values, "
@@ -21,7 +19,7 @@ def extract_text_from_image(image_bytes: bytes, content_type: str = "image/jpeg"
 
     try:
         response = openai_client.chat.completions.create(
-            model=VISION_MODEL,
+            model=VLM_MODEL,
             messages=[
                 {
                     "role": "user",
@@ -33,6 +31,7 @@ def extract_text_from_image(image_bytes: bytes, content_type: str = "image/jpeg"
             ],
             max_tokens=1024,
         )
-        return response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        return content.strip() if content else "[No content returned]"
     except Exception as e:
         return f"[Could not process image: {e}]"

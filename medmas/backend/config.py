@@ -25,6 +25,7 @@ SUPABASE_SERVICE_ROLE_KEY = _clean_env("SUPABASE_SERVICE_ROLE_KEY")
 MODEL_NAME         = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3.1-8B-Instruct")
 EMBEDDING_MODEL    = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 SPEECH_TO_TEXT_MODEL = os.getenv("SPEECH_TO_TEXT_MODEL", "openai/whisper-large-v3")
+VLM_MODEL = os.getenv("VLM_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")
 
 # Resolve all paths relative to project root
 DOCTORS_CSV_PATH   = str(PROJECT_ROOT / os.getenv("DOCTORS_CSV_PATH", "data/doctors.csv"))
@@ -33,6 +34,9 @@ QDRANT_URL         = os.getenv("QDRANT_URL")
 QDRANT_API_KEY     = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION  = os.getenv("QDRANT_COLLECTION", "medmas_medical_kb")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+LLAMAPARSER_API_URL = os.getenv("LLAMAPARSER_API_URL")
+LLAMAPARSER_API_KEY = _clean_env("LLAMAPARSER_API_KEY")
+LLAMAPARSER_PARSER_ID = os.getenv("LLAMAPARSER_PARSER_ID")
 
 UNSUPPORTED_MODEL_ALIASES = {
     "gpt-4.1-mini": "meta-llama/Meta-Llama-3.1-8B-Instruct",

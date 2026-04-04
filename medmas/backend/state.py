@@ -36,6 +36,7 @@ class MedMASState(TypedDict):
     asha_result:     Optional[Dict[str, Any]]   # Agent 6
     offtopic_result: Optional[Dict[str, Any]]   # Guardrail: non-medical queries
     doctor_list:     Optional[List[Dict[str, Any]]]
+    hint_intent:     Optional[str]
 
     # ── ASHA Worker Mode (Agent 6) ─────────────────────────────────────
     asha_mode:       bool
@@ -63,6 +64,7 @@ def initial_state(
     patient_id:     str           = None,
     session_context: dict         = None,
     session_history: list         = None,
+    hint_intent:     str           = None,
 ) -> MedMASState:
     """Create a fresh MedMASState for a new request."""
     return MedMASState(
@@ -90,6 +92,7 @@ def initial_state(
         asha_result=None,
         offtopic_result=None,
         doctor_list=None,
+        hint_intent=None,
         asha_mode=asha_mode,
         asha_worker_id=asha_worker_id,
         patient_id=patient_id,

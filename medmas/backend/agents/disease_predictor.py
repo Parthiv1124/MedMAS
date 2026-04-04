@@ -55,23 +55,35 @@ If you cannot find ANY lab values, return exactly: {{}}.
 Report text:
 {text}"""
 
+LAB_EXTRACTION_FIELDS = [
+    "HbA1c", "fasting_glucose", "systolic_bp", "diastolic_bp", "total_cholesterol",
+    "LDL", "HDL", "BMI", "creatinine", "hemoglobin", "RBC", "WBC", "platelets", "triglycerides",
+    "urea", "uric_acid", "TSH", "T3", "T4", "sodium", "potassium", "calcium", "iron", "vitamin_D",
+    "vitamin_B12", "albumin", "bilirubin", "SGOT", "SGPT", "alkaline_phosphatase",
+]
+
+LAB_EXTRACTION_PROMPT = f"""You are a lab data extractor.
+Return only a JSON object that includes any of these fields: {', '.join(LAB_EXTRACTION_FIELDS)}.
+Use the exact field names, include only numeric values, and omit any additional text.
+If none of these values are present, respond with exactly {{}}.
+
+Lab report text:
+{{text}}"""
+
 
 def _llm_extract_lab_values(raw_text: str) -> dict:
     """Use the LLM to extract lab values when regex patterns fail."""
     if not raw_text or len(raw_text.strip()) < 20:
         return {}
-    # Truncate to avoid token limits
     truncated = raw_text[:4000]
-    prompt = ChatPromptTemplate.from_template(LLM_EXTRACT_PROMPT)
+    prompt = ChatPromptTemplate.from_template(LAB_EXTRACTION_PROMPT)
     chain = prompt | llm | StrOutputParser()
     try:
         raw_output = chain.invoke({"text": truncated})
-        # Parse JSON from the response — handle markdown code blocks
         cleaned = raw_output.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         values = json.loads(cleaned)
-        # Keep only numeric values
         return {k: float(v) for k, v in values.items() if isinstance(v, (int, float))}
     except Exception:
         return {}
@@ -101,6 +113,9 @@ def disease_predictor_node(state: MedMASState) -> dict:
             print(f"[DiseasePredictor] LLM extracted {len(values)} values: {list(values.keys())}")
 
     if not values:
+        print("[DiseasePredictor] Lab extraction still empty after LLM. Raw text snippet:")
+        snippet = raw_text.replace("\\n", " ").strip()[:400]
+        print(snippet or "[empty]")
         return {"error": "Could not extract any lab values from the input."}
 
     # Build input that includes both raw values and flags
