@@ -39,7 +39,7 @@ export default function ChatSidebar({
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm lg:hidden"
+            className="fixed inset-0 z-30 bg-slate-950/28 backdrop-blur-sm lg:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -51,33 +51,41 @@ export default function ChatSidebar({
       {/* Sidebar panel */}
       <motion.aside
         initial={false}
-        animate={{ width: isOpen ? 260 : 0 }}
+        animate={{ width: isOpen ? 280 : 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 35 }}
         style={{ minWidth: 0, flexShrink: 0 }}
-        className="relative z-40 flex h-full flex-col overflow-hidden border-r border-neutral-200/70 bg-white/75 backdrop-blur-2xl"
+        className="fixed inset-y-0 left-0 z-40 flex h-full flex-col overflow-hidden border-r border-white/50 bg-white/78 shadow-[0_20px_60px_rgba(15,23,42,0.14)] backdrop-blur-2xl lg:relative lg:shadow-none"
       >
         {/* Fixed-width inner — keeps layout stable during animation */}
-        <div className="flex h-full w-[260px] flex-col">
+        <div className="flex h-full w-[280px] flex-col">
 
           {/* Header row */}
-          <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
-            <span className="text-sm font-semibold text-neutral-800">Chat History</span>
-            <button
-              onClick={onToggle}
-              className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-              title="Collapse sidebar"
-            >
-              <PanelLeft className="h-4 w-4" />
-            </button>
+          <div className="border-b border-neutral-200/70 px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">Workspace</p>
+                <span className="text-sm font-semibold text-neutral-900">Chat History</span>
+              </div>
+              <button
+                onClick={onToggle}
+                className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                title="Collapse sidebar"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-neutral-500">
+              Recent conversations stay grouped by time so you can resume quickly.
+            </p>
           </div>
 
           {/* New Chat */}
           <div className="p-3">
             <button
               onClick={onNewChat}
-              className="flex w-full items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm font-medium text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:shadow active:scale-[0.98]"
+              className="flex w-full items-center gap-2 rounded-2xl border border-white/70 bg-gradient-to-r from-sky-500 to-cyan-400 px-3 py-3 text-sm font-semibold text-white shadow-[0_16px_34px_rgba(14,165,233,0.26)] transition hover:-translate-y-0.5 active:scale-[0.98]"
             >
-              <Plus className="h-4 w-4 text-neutral-400" />
+              <Plus className="h-4 w-4" />
               New Chat
             </button>
           </div>
@@ -87,7 +95,7 @@ export default function ChatSidebar({
             {groups.map(({ label, items }) =>
               items.length === 0 ? null : (
                 <div key={label} className="mb-3">
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-widest text-neutral-400">
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">
                     {label}
                   </p>
                   {items.map((session) => (
@@ -105,7 +113,7 @@ export default function ChatSidebar({
 
             {sessions.length === 0 && (
               <div className="flex flex-col items-center gap-2 pt-14 text-center">
-                <MessageSquare className="h-9 w-9 text-neutral-200" />
+                <MessageSquare className="h-9 w-9 text-neutral-300" />
                 <p className="text-xs font-medium text-neutral-400">No chats yet</p>
                 <p className="text-[11px] text-neutral-300">Your conversations will appear here.</p>
               </div>
@@ -133,13 +141,13 @@ function SessionItem({ session, isActive, onSelect, onDelete }) {
   return (
     <button
       onClick={onSelect}
-      className={`group relative flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+      className={`group relative flex w-full items-start gap-2 rounded-2xl border px-3 py-2.5 text-left text-sm transition-all ${
         isActive
-          ? "bg-neutral-100 font-medium text-neutral-900"
-          : "text-neutral-600 hover:bg-neutral-50 hover:text-neutral-800"
+          ? "border-sky-200 bg-sky-50/90 font-medium text-neutral-900 shadow-sm"
+          : "border-transparent text-neutral-600 hover:border-white/70 hover:bg-white/60 hover:text-neutral-800"
       }`}
     >
-      <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-300" />
+      <MessageSquare className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${isActive ? "text-sky-500" : "text-neutral-300"}`} />
 
       <span className="flex-1 truncate leading-snug">{session.title}</span>
 

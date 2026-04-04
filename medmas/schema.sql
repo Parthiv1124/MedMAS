@@ -54,3 +54,52 @@ CREATE INDEX idx_health_logs_user_id  ON health_logs(user_id);
 CREATE INDEX idx_health_logs_type     ON health_logs(log_type);
 CREATE INDEX idx_asha_patients_worker ON asha_patients(asha_worker_id);
 CREATE INDEX idx_asha_assess_patient  ON asha_assessments(patient_id);
+
+-- Keep public.users aligned with Supabase Auth users.
+-- This makes auth.users.id and public.users.id the same identity for app-level foreign keys.
+create or replace function public.handle_auth_user_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.users (id, phone, district, lang_code, state)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'phone', 'missing-phone-' || new.id::text),
+    new.raw_user_meta_data ->> 'district',
+    coalesce(new.raw_user_meta_data ->> 'lang_code', 'en'),
+    new.raw_user_meta_data ->> 'state'
+  )
+  on conflict (id) do update
+  set
+    phone = excluded.phone,
+    district = excluded.district,
+    lang_code = excluded.lang_code,
+    state = excluded.state;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+after insert or update on auth.users
+for each row execute function public.handle_auth_user_sync();
+
+-- Backfill existing auth users into public.users.
+insert into public.users (id, phone, district, lang_code, state)
+select
+  au.id,
+  coalesce(au.raw_user_meta_data ->> 'phone', 'missing-phone-' || au.id::text),
+  au.raw_user_meta_data ->> 'district',
+  coalesce(au.raw_user_meta_data ->> 'lang_code', 'en'),
+  au.raw_user_meta_data ->> 'state'
+from auth.users au
+on conflict (id) do update
+set
+  phone = excluded.phone,
+  district = excluded.district,
+  lang_code = excluded.lang_code,
+  state = excluded.state;

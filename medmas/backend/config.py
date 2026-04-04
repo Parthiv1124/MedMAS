@@ -21,6 +21,7 @@ DEEPINFRA_API_KEY  = _clean_env("DEEPINFRA_API_KEY")
 DEEPINFRA_BASE_URL = os.getenv("DEEPINFRA_BASE_URL", "https://api.deepinfra.com/v1/openai")
 SUPABASE_URL       = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY  = os.getenv("SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_ROLE_KEY = _clean_env("SUPABASE_SERVICE_ROLE_KEY")
 MODEL_NAME         = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3.1-8B-Instruct")
 EMBEDDING_MODEL    = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 SPEECH_TO_TEXT_MODEL = os.getenv("SPEECH_TO_TEXT_MODEL", "openai/whisper-large-v3")
@@ -79,12 +80,19 @@ def create_openai_client() -> OpenAI:
 llm = create_llm()
 openai_client = create_openai_client()
 
-# Singleton Supabase client — graceful fallback if credentials are placeholders
+# Supabase clients:
+# - supabase: auth/session client
+# - supabase_admin: server-side DB client
 supabase = None
+supabase_admin = None
+supabase_db = None
 try:
     if SUPABASE_URL and "xxxx" not in SUPABASE_URL:
         from supabase import create_client, Client
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        if SUPABASE_SERVICE_ROLE_KEY:
+            supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        supabase_db = supabase_admin or supabase
     else:
         print("[Config] Supabase credentials not configured — logging disabled")
 except Exception as e:
