@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from config import supabase
+from config import supabase_db as supabase
 
 
 def _check_supabase():
