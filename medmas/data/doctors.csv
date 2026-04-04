@@ -1,0 +1,21 @@
+district,state,specialty,name,phone,address,available_days
+Vadodara,Gujarat,General,Dr. Amit Mehta,+919876500001,PHC Alkapuri Road,Mon-Sat
+Vadodara,Gujarat,Cardiology,Dr. Sunita Patel,+919876500002,Sterling Hospital Vadodara,Mon-Fri
+Vadodara,Gujarat,Endocrinology,Dr. Ravi Shah,+919876500003,Baroda Medical College,Tue-Sat
+Vadodara,Gujarat,Psychiatry,Dr. Priya Joshi,+919876500004,iCall Wellness Centre,Mon-Thu
+Vadodara,Gujarat,Paediatrics,Dr. Neha Gupta,+919876500005,Children Hospital Vadodara,Mon-Sat
+Rajkot,Gujarat,General,Dr. Mohan Das,+919876500006,District Hospital Rajkot,Mon-Sat
+Rajkot,Gujarat,Cardiology,Dr. Kiran Shah,+919876500007,Rajkot Civil Hospital,Mon-Fri
+Rajkot,Gujarat,Obstetrics,Dr. Mina Trivedi,+919876500008,New Life Hospital Rajkot,Mon-Sat
+Surat,Gujarat,General,Dr. Ashok Patel,+919876500009,SMIMER Hospital Surat,Mon-Sat
+Surat,Gujarat,Cardiology,Dr. Leena Kapoor,+919876500010,New Civil Hospital Surat,Mon-Fri
+Surat,Gujarat,Endocrinology,Dr. Viral Shah,+919876500011,South Gujarat PG Institute,Tue-Sat
+Surat,Gujarat,Psychiatry,Dr. Pooja Mehta,+919876500012,Mind Wellness Surat,Mon-Wed
+Bharuch,Gujarat,General,Dr. Ramesh Joshi,+919876500013,Bharuch District Hospital,Mon-Sat
+Bharuch,Gujarat,Paediatrics,Dr. Anita Sharma,+919876500014,Child Care Clinic Bharuch,Tue-Sat
+Ahmedabad,Gujarat,Cardiology,Dr. Suresh Kumar,+919876500015,UN Mehta Heart Hospital,Mon-Fri
+Ahmedabad,Gujarat,Neurology,Dr. Kavita Rao,+919876500016,Sterling Neurology Ahmedabad,Mon-Fri
+Ahmedabad,Gujarat,Endocrinology,Dr. Farhan Sheikh,+919876500017,Apollo Ahmedabad,Mon-Sat
+Mumbai,Maharashtra,General,Dr. Prashant Patil,+919876500018,KEM Hospital Mumbai,Mon-Sat
+Mumbai,Maharashtra,Cardiology,Dr. Seema Iyer,+919876500019,Lilavati Hospital Mumbai,Mon-Fri
+Delhi,Delhi,General,Dr. Arun Verma,+919876500020,AIIMS Delhi,Mon-Sat

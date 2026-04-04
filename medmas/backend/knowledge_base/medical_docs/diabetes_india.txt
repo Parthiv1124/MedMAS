@@ -1,0 +1,11 @@
+Diabetes in India: ICMR-INDIAB Study Findings
+India has over 101 million people with diabetes as of 2023 (ICMR-INDIAB study).
+Prevalence ranges from 4.8% in rural Arunachal Pradesh to 26.4% in Goa.
+Type 2 diabetes accounts for 95% of all diabetes cases in India.
+Key risk factors: obesity (BMI >25 for Asians), family history, physical inactivity, unhealthy diet.
+Diagnostic criteria (ICMR/WHO): Fasting glucose ≥126 mg/dL, HbA1c ≥6.5%, or random glucose ≥200 mg/dL with symptoms.
+Prediabetes: Fasting glucose 100-125 mg/dL or HbA1c 5.7-6.4%.
+Symptoms: Excessive thirst (polydipsia), frequent urination (polyuria), fatigue, blurred vision, slow wound healing.
+Complications: Diabetic retinopathy, nephropathy, neuropathy, cardiovascular disease.
+Treatment: Lifestyle modification first. Metformin is first-line drug therapy. Regular HbA1c monitoring every 3 months.
+Prevention: Regular physical activity (150 min/week moderate), healthy diet, maintain BMI below 23.

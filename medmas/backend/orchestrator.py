@@ -1,0 +1,701 @@
+# backend/orchestrator.py
+from datetime import datetime
+from uuid import uuid4
+import logging
+
+from langgraph.graph import StateGraph, END
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from state import MedMASState, initial_state
+from config import llm
+from agents.crisis_guard    import crisis_guard_node
+from agents.multilingual    import language_detector_node, multilingual_output_node
+from agents.symptom_checker_v2 import symptom_checker_node
+from agents.disease_predictor import disease_predictor_node
+from agents.empathy_chatbot import empathy_chatbot_node
+from agents.health_scorer   import health_scorer_node
+from agents.asha_copilot    import asha_copilot_node
+from services.doctor_finder import find_doctors, get_known_districts
+from services.osm_doctor_finder import find_nearby_doctors
+
+LOGGER = logging.getLogger("medmas.orchestrator")
+if not LOGGER.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[Orch] %(message)s"))
+    LOGGER.addHandler(handler)
+LOGGER.setLevel(logging.INFO)
+
+DOCTOR_REFERRAL_FOOTER = (
+    "\n\n---\n"
+    "IMPORTANT: This information is for guidance only. "
+    "Always consult a qualified doctor before acting on any health information. "
+    "In an emergency, call 112."
+)
+
+MENTAL_KEYWORDS = (
+    "stress", "stressed", "anxiety", "anxious", "panic", "overwhelmed",
+    "depressed", "depression", "sad", "low", "lonely", "burnout",
+    "burned out", "can't sleep", "cannot sleep", "not sleeping",
+    "sleep", "insomnia", "worry", "worried", "mental", "emotionally",
+)
+LAB_KEYWORDS = (
+    "hba1c", "glucose", "blood sugar", "cholesterol", "cbc", "creatinine",
+    "hemoglobin", "bp", "blood pressure", "lab report", "report",
+)
+DOCTOR_KEYWORDS = (
+    "doctor", "specialist", "clinic", "hospital", "nearby doctor",
+    "find a doctor", "appointment",
+)
+REMINDER_KEYWORDS = (
+    "reminder", "remind me", "medicine reminder", "tablet reminder",
+    "medication reminder", "checkup reminder",
+)
+LIFESTYLE_KEYWORDS = (
+    "diet", "exercise", "workout", "steps", "calories", "nutrition",
+    "habit", "habits", "health score", "lifestyle", "weight loss",
+)
+SYMPTOM_KEYWORDS = (
+    "fever", "cough", "pain", "vomit", "vomiting", "nausea", "diarrhea",
+    "rash", "swelling", "headache", "dizzy", "dizziness", "chest pain",
+    "breathing", "shortness of breath", "infection",
+)
+FOLLOW_UP_PREFIXES = (
+    "because", "due to", "it is due to", "it's due to", "its due to",
+    "from", "mainly", "mostly", "related to", "caused by", "since",
+    "after", "yes", "no", "sometimes", "often",
+)
+
+# ── Context helper ─────────────────────────────────────────────────────────
+def _format_history(session_history: list, max_turns: int = 6) -> str:
+    """Format the last N turn-pairs from session_history into a readable block."""
+    if not session_history:
+        return ""
+    recent = session_history[-(max_turns * 2):]
+    lines = []
+    for turn in recent:
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        content = turn.get("content", "").strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _recent_user_messages(session_history: list, limit: int = 3) -> list[str]:
+    recent = []
+    for turn in reversed(session_history or []):
+        if turn.get("role") != "user":
+            continue
+        content = (turn.get("content") or "").strip()
+        if content:
+            recent.append(content)
+        if len(recent) >= limit:
+            break
+    return list(reversed(recent))
+
+
+def _last_history_intent(session_history: list) -> str:
+    for turn in reversed(session_history or []):
+        intent = (turn.get("intent") or "").strip().lower()
+        if intent:
+            return intent
+    return ""
+
+
+def _looks_like_follow_up(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    words = normalized.split()
+    if len(words) > 14:
+        return False
+    if normalized in {"yes", "no", "sometimes", "often", "rarely"}:
+        return True
+    return normalized.startswith(FOLLOW_UP_PREFIXES)
+
+
+def _explicit_intent_for_text(text: str) -> str | None:
+    if _contains_any(text, MENTAL_KEYWORDS):
+        return "mental"
+    if _contains_any(text, LAB_KEYWORDS):
+        return "lab"
+    if _contains_any(text, DOCTOR_KEYWORDS):
+        return "doctor"
+    if _contains_any(text, REMINDER_KEYWORDS):
+        return "reminder"
+    if _contains_any(text, LIFESTYLE_KEYWORDS):
+        return "lifestyle"
+    if _contains_any(text, SYMPTOM_KEYWORDS):
+        return "symptom"
+    return None
+
+
+def _infer_contextual_intent(state: MedMASState) -> str | None:
+    text = _normalize_text(state.get("translated_input", ""))
+    if not text:
+        return None
+
+    explicit = _explicit_intent_for_text(text)
+    if explicit:
+        return explicit
+
+    session_history = state.get("session_history", [])
+    session_context = state.get("session_context") or {}
+    previous_intent = str(
+        session_context.get("last_intent") or _last_history_intent(session_history) or ""
+    ).lower()
+    recent_user_history = _normalize_text(" ".join(_recent_user_messages(session_history)))
+    recent_mental_history = _contains_any(recent_user_history, MENTAL_KEYWORDS)
+
+    if previous_intent == "mental":
+        if _looks_like_follow_up(text):
+            return "mental"
+        if recent_mental_history and len(text.split()) <= 18:
+            return "mental"
+
+    if recent_mental_history and _looks_like_follow_up(text):
+        return "mental"
+
+    return None
+
+# ── Intent Classifier ──────────────────────────────────────────────────────
+INTENT_PROMPT = """Classify this query into exactly one category.
+
+Categories: symptom | lab | mental | lifestyle | asha | doctor | reminder | offtopic
+
+symptom   - user describes physical symptoms or asks about a condition
+lab       - user uploads or mentions lab report values (HbA1c, BP, glucose, etc.)
+mental    - user mentions stress, anxiety, depression, sleep issues, emotional distress
+lifestyle - user asks about diet, exercise, health score, habits, prevention
+asha      - ASHA worker submitting patient field observations for triage
+doctor    - user wants to find a doctor or specialist
+reminder  - user wants to set a medication or checkup reminder
+offtopic  - NOT related to health/medical/wellness at all (e.g. sports, politics, weather, math, jokes, coding, general chitchat, greetings like "hi" or "hello")
+
+IMPORTANT: Only classify as offtopic if the query has absolutely NO connection to health, medicine, wellness, symptoms, mental health, or lifestyle. When in doubt, prefer a medical category.
+IMPORTANT: If the latest query is a short follow-up to the prior conversation, preserve the existing topic unless the user clearly changes topics.
+
+Query: {query}
+
+Respond with ONLY the category label, nothing else."""
+
+def intent_classifier_node(state: MedMASState) -> dict:
+    agent_map = {
+        "symptom":   ["symptom_checker"],
+        "lab":       ["disease_predictor"],
+        "mental":    ["empathy_chatbot"],
+        "lifestyle": ["health_scorer"],
+        "asha":      ["asha_copilot"],
+        "doctor":    ["doctor_finder"],
+        "reminder":  ["health_scorer"],
+        "offtopic":  ["offtopic_responder"],
+    }
+
+    hint_intent = state.get("hint_intent")
+    if hint_intent:
+        agents = agent_map.get(hint_intent, ["symptom_checker"])
+        LOGGER.info(f"hint intent {hint_intent}, forcing agents {agents}")
+        return {"intent": hint_intent, "agents_to_run": agents}
+
+    # If crisis guard already set intent, respect it
+    if state.get("crisis_detected") and state.get("intent") == "mental":
+        return {"intent": "mental", "agents_to_run": ["empathy_chatbot"]}
+
+    # If ASHA mode forced intent, respect it
+    if state.get("asha_mode") and state.get("intent") == "asha":
+        return {"intent": "asha", "agents_to_run": ["asha_copilot"]}
+
+    contextual_intent = _infer_contextual_intent(state)
+    if contextual_intent:
+        return {
+            "intent": contextual_intent,
+            "agents_to_run": agent_map.get(contextual_intent, ["symptom_checker"]),
+        }
+
+    history_text = _format_history(state.get("session_history", []))
+    query = state["translated_input"]
+    if history_text:
+        query = f"Conversation so far:\n{history_text}\n\nLatest query: {query}"
+
+    prompt  = ChatPromptTemplate.from_template(INTENT_PROMPT)
+    chain   = prompt | llm | StrOutputParser()
+    intent  = chain.invoke({"query": query}).strip().lower()
+
+    agents = agent_map.get(intent, ["symptom_checker"])
+    LOGGER.info(f"Intent classified as {intent}; running agents {agents}")
+    return {"intent": intent, "agents_to_run": agents}
+
+def route_by_intent(state: MedMASState) -> str:
+    route_map = {
+        "symptom":   "symptom_checker",
+        "doctor":    "doctor_finder",
+        "lab":       "disease_predictor",
+        "mental":    "empathy_chatbot",
+        "lifestyle": "health_scorer",
+        "reminder":  "health_scorer",
+        "asha":      "asha_copilot",
+        "offtopic":  "offtopic_responder",
+    }
+    route = route_map.get(state.get("intent", "symptom"), "symptom_checker")
+    LOGGER.info(f"Routing {state.get('intent')} via {route}")
+    return route
+
+# ── Off-Topic Guardrail Node ───────────────────────────────────────────────
+OFFTOPIC_PROMPT = """You are MedMAS, a Multi-Agent AI Health System for rural India.
+The user asked something unrelated to health or medicine.
+
+User query: {query}
+
+Respond politely and helpfully in 2-3 sentences:
+1. Greet them warmly if it's a greeting, or acknowledge their question.
+2. Gently let them know you're a health assistant and can't help with that topic.
+3. Suggest what they CAN ask you about (symptoms, lab reports, mental health, lifestyle, health score).
+
+Keep it friendly, warm, and encouraging. Do NOT be rude or dismissive.
+If the user said "hi" or "hello", welcome them and tell them what you can do.
+Respond in the same language the user used if possible."""
+
+def offtopic_responder_node(state: MedMASState) -> dict:
+    """Handles non-medical queries with a friendly redirect."""
+    history_text = _format_history(state.get("session_history", []))
+    query = state["translated_input"]
+    if history_text:
+        query = f"Conversation so far:\n{history_text}\n\nLatest message: {query}"
+    prompt = ChatPromptTemplate.from_template(OFFTOPIC_PROMPT)
+    chain  = prompt | llm | StrOutputParser()
+    try:
+        response = chain.invoke({"query": query})
+    except Exception:
+        response = (
+            "Hello! I'm MedMAS, your AI health assistant for rural India. "
+            "I can help you with symptoms, lab reports, mental health support, "
+            "lifestyle health scores, and more. How can I help with your health today?"
+        )
+    return {"offtopic_result": {"response": response}}
+
+# ── Session Memory Node ────────────────────────────────────────────────────
+def session_memory_node(state: MedMASState) -> dict:
+    """Accumulates all agent findings into session_context for cross-agent synthesis."""
+    ctx = dict(state.get("session_context") or {})
+
+    if state.get("symptom_result"):
+        diagnoses = state["symptom_result"].get("diagnoses", [])
+        ctx["top_condition"] = diagnoses[0].get("condition") if diagnoses else None
+        ctx["symptom_triage"] = state["symptom_result"].get("triage_level")
+
+    if state.get("disease_result"):
+        conditions = state["disease_result"].get("conditions", [])
+        ctx["has_diabetes_risk"] = any(
+            c.get("name") == "Diabetes" and c.get("risk_level") in ("moderate", "high")
+            for c in conditions
+        )
+        ctx["has_hypertension_risk"] = any(
+            c.get("name") == "Hypertension" and c.get("risk_level") in ("moderate", "high")
+            for c in conditions
+        )
+
+    if state.get("empathy_result"):
+        ctx["mental_health_severity"] = state["empathy_result"].get("severity")
+
+    if state.get("health_result"):
+        scores = state["health_result"].get("dimension_scores", {})
+        ctx["health_score"]  = state["health_result"].get("total_score")
+        ctx["high_stress"]   = scores.get("stress", 15) < 8
+
+    # Cross-agent pattern: diabetic risk + high stress = enhanced alert
+    ctx["combined_diabetes_alert"] = bool(
+        ctx.get("has_diabetes_risk") and ctx.get("high_stress")
+    )
+    ctx["last_intent"] = state.get("intent", "")
+    ctx["last_triage_level"] = state.get("triage_level", "routine")
+
+    lab_session = ctx.get("lab_session", {})
+    if state.get("media_type") == "pdf" and state.get("disease_result"):
+        lab_session = lab_session or {}
+        if not lab_session.get("id"):
+            lab_session["id"] = str(uuid4())
+        if not lab_session.get("created_at"):
+            lab_session["created_at"] = datetime.utcnow().isoformat()
+        lab_session["latest_triage"] = state.get("triage_level", "routine")
+        lab_session["summary"] = {
+            "conditions": state["disease_result"].get("conditions", []),
+            "urgency_flag": state["disease_result"].get("urgency_flag"),
+        }
+        lab_session["query"] = state.get("raw_input", "")
+        lab_session["last_updated"] = datetime.utcnow().isoformat()
+        ctx["lab_session"] = lab_session
+        LOGGER.info(
+            "lab_session updated "
+            f"id={lab_session['id']} triage={lab_session['latest_triage']} "
+            f"conditions={[c.get('name') for c in lab_session.get('summary', {}).get('conditions', [])]}"
+        )
+    elif lab_session:
+        ctx["lab_session"] = lab_session
+    return {"session_context": ctx}
+
+
+def _infer_specialty_from_query(query: str) -> str:
+    query = (query or "").lower()
+    specialty_keywords = {
+        "Cardiology": ["cardio", "heart", "chest"],
+        "Neurology": ["neuro", "brain", "nerve", "stroke", "seizure"],
+        "Endocrinology": ["diabet", "thyroid", "hormone", "endocr"],
+        "Psychiatry": ["psychiat", "mental", "anxiety", "depression", "stress"],
+        "Paediatrics": ["child", "children", "kid", "kids", "pediatric", "paediatric"],
+        "Obstetrics": ["pregnan", "gyn", "women", "obstetric", "delivery"],
+    }
+    for specialty, keywords in specialty_keywords.items():
+        if any(keyword in query for keyword in keywords):
+            return specialty
+    return "General"
+
+
+def _infer_district_from_query(query: str) -> str:
+    query = (query or "").lower()
+    for district in get_known_districts():
+        if district.lower() in query:
+            return district
+    return ""
+
+# ── Doctor Finder Node ─────────────────────────────────────────────────────
+async def doctor_finder_node(state: MedMASState) -> dict:
+    if state.get("doctor_list"):
+        return {"doctor_list": state["doctor_list"]}  # Keep existing
+    if state.get("error") and not any(
+        state.get(key) for key in ("symptom_result", "disease_result", "asha_result")
+    ):
+        return {"doctor_list": []}
+
+    specialty = "General"
+    if state.get("symptom_result"):
+        specialty = state["symptom_result"].get("recommended_specialty", "General")
+    elif state.get("disease_result"):
+        conditions = [c["name"] for c in state["disease_result"].get("conditions", [])]
+        if "Diabetes" in conditions:
+            specialty = "Endocrinology"
+        elif "Hypertension" in conditions:
+            specialty = "Cardiology"
+    elif state.get("asha_result"):
+        specialty = state["asha_result"].get("refer_specialty", "General")
+    elif state.get("intent") == "doctor":
+        specialty = _infer_specialty_from_query(state.get("translated_input", ""))
+
+    query_district = ""
+    if state.get("intent") == "doctor":
+        query_district = _infer_district_from_query(state.get("translated_input", ""))
+
+    # Try OSM real nearby doctors if user lat/lng is available
+    user_lat = state.get("user_lat")
+    user_lng = state.get("user_lng")
+    if user_lat and user_lng:
+        try:
+            osm_doctors = await find_nearby_doctors(
+                lat=user_lat, lng=user_lng, specialty=specialty, limit=5,
+            )
+            print(f"[DoctorFinder] OSM returned {len(osm_doctors)} doctors for ({user_lat},{user_lng}) specialty={specialty}")
+            if osm_doctors:
+                return {"doctor_list": osm_doctors}
+        except Exception as e:
+            print(f"[DoctorFinder] OSM failed: {e}")
+    else:
+        print(
+            f"[DoctorFinder] No coords in state, using CSV. "
+            f"query_district={query_district or 'none'} state_district={state.get('user_district')}"
+        )
+
+    # Fallback: static CSV doctors
+    district = query_district or state.get("user_district") or ""
+    # 1. Best: same district + same specialty
+    doctors = find_doctors(specialty=specialty, district=district)
+    # 2. Same district, any specialty (at least they are nearby)
+    if not doctors and district:
+        doctors = find_doctors(specialty="", district=district)
+    # 3. Last resort: matching specialty from any district
+    if not doctors:
+        doctors = find_doctors(specialty=specialty, district="")
+    return {"doctor_list": doctors}
+
+# ── Response Aggregator ────────────────────────────────────────────────────
+def _build_error_response(state: MedMASState) -> str:
+    """Create a user-facing message when an agent fails."""
+    error = (state.get("error") or "I could not complete that request.").strip()
+    intent = state.get("intent") or "symptom"
+
+    intent_messages = {
+        "symptom": (
+            "I could not complete the symptom assessment right now. "
+            "Please resend the main symptoms, duration, and severity."
+        ),
+        "lab": (
+            "I could not analyse the lab report right now. "
+            "Please resend the report or provide the main lab values in text."
+        ),
+        "mental": (
+            "I could not complete the mental health support response right now. "
+            "If you are in immediate danger, call 112 or contact iCall at 9152987821."
+        ),
+        "lifestyle": (
+            "I could not generate the health score right now. "
+            "Please resend your sleep, activity, diet, stress, and habit details."
+        ),
+        "asha": (
+            "I could not complete the ASHA triage right now. "
+            "Please review the patient observations and try again."
+        ),
+        "doctor": (
+            "I could not complete the nearby doctor search right now. "
+            "Please try again with your district or live location enabled."
+        ),
+    }
+    base_message = intent_messages.get(
+        intent,
+        "I could not complete that request right now. Please try again."
+    )
+    return f"{base_message}\n\nTechnical detail: {error}"
+
+
+def response_aggregator_node(state: MedMASState) -> dict:
+    parts  = []
+    triage = state.get("triage_level", "routine")
+    ctx    = state.get("session_context", {})
+    error  = state.get("error")
+
+    # Crisis alert banner
+    if state.get("crisis_detected"):
+        parts.append("CRISIS SUPPORT RESOURCES")
+        parts.append("=" * 40)
+        parts.append("iCall: 9152987821 (Mon-Sat 8am-10pm, free)")
+        parts.append("Vandrevala Foundation: 1860-2662-345 (24x7, free)")
+        parts.append("Emergency: 112")
+        parts.append("")
+
+    # Cross-agent synthesis alert
+    if ctx.get("combined_diabetes_alert"):
+        parts.append("COMBINED RISK ALERT: High stress combined with diabetes risk markers increases your risk significantly. Please prioritise both conditions.")
+        parts.append("")
+
+    # Symptom result
+    if state.get("symptom_result"):
+        r = state["symptom_result"]
+        parts.append("SYMPTOM ASSESSMENT")
+        parts.append("=" * 40)
+        structured = r.get("structured_symptoms") or {}
+        if structured.get("primary_symptoms"):
+            parts.append(f"Primary Symptoms: {', '.join(structured['primary_symptoms'])}")
+        if structured.get("duration") and structured.get("duration") != "unknown":
+            parts.append(f"Duration: {structured['duration']}")
+        if structured.get("severity") and structured.get("severity") != "unknown":
+            parts.append(f"Severity: {structured['severity'].upper()}")
+        if structured.get("risk_factors"):
+            parts.append(f"Risk Factors: {', '.join(structured['risk_factors'])}")
+        for i, d in enumerate(r.get("diagnoses", []), 1):
+            parts.append(f"{i}. {d['condition']} ({d['likelihood']} likelihood)")
+            parts.append(f"   {d['reason']}")
+        parts.append(f"\nTriage Level: {r.get('triage_level', 'routine').upper()}")
+        if r.get("confidence_summary"):
+            parts.append(f"Confidence: {str(r['confidence_summary']).upper()}")
+        if r.get("red_flags"):
+            parts.append(f"Red Flags: {', '.join(r['red_flags'])}")
+        if r.get("follow_up_questions"):
+            parts.append("Follow-up Questions:")
+            for question in r["follow_up_questions"][:3]:
+                parts.append(f"  - {question}")
+        parts.append(f"\nNext Steps: {r.get('next_steps', '')}")
+
+    # Disease result
+    if state.get("disease_result"):
+        r = state["disease_result"]
+        parts.append("\nLAB REPORT ANALYSIS")
+        parts.append("=" * 40)
+        for c in r.get("conditions", []):
+            parts.append(f"{c['name']} Risk: {c['risk_score']}/100 ({c['risk_level']})")
+            parts.append(f"  {c['plain_explanation']}")
+        if r.get("urgency_flag"):
+            parts.append("\nURGENT: Please see a doctor within 48 hours.")
+        if r.get("lifestyle_recommendations"):
+            parts.append("\nRecommendations:")
+            for rec in r["lifestyle_recommendations"]:
+                parts.append(f"  - {rec}")
+
+    # Mental health result
+    if state.get("empathy_result"):
+        r = state["empathy_result"]
+        parts.append(f"\n{r.get('response', '')}")
+
+    # Health score result
+    if state.get("health_result"):
+        r = state["health_result"]
+        parts.append("\nHEALTH SCORE")
+        parts.append("=" * 40)
+        parts.append(f"Overall Score: {r.get('total_score', 0)}/100")
+        if r.get("action_items"):
+            parts.append("Top 3 Actions:")
+            for a in r["action_items"][:3]:
+                parts.append(f"  {a['priority']}. {a['action']} (Impact: {a['impact']})")
+        parts.append(f"\n{r.get('coach_message', '')}")
+
+    # Off-topic result (skip doctor footer if off-topic)
+    if state.get("offtopic_result"):
+        return {"aggregated_response": state["offtopic_result"]["response"]}
+
+    # ASHA result
+    if state.get("asha_result"):
+        r = state["asha_result"]
+        parts.append("\nASHA FIELD TRIAGE")
+        parts.append("=" * 40)
+        parts.append(f"Decision: {r.get('triage_decision', '').upper()}")
+        parts.append(f"Refer To: {r.get('refer_to', 'PHC')}")
+        if r.get("refer_specialty"):
+            parts.append(f"Specialty: {r.get('refer_specialty')}")
+        if r.get("urgency_hours"):
+            parts.append(f"Urgency: Within {r.get('urgency_hours')} hours")
+        parts.append(f"\n{r.get('clinical_summary', '')}")
+        if r.get("danger_signs"):
+            parts.append("\nDanger Signs to Watch:")
+            for sign in r["danger_signs"]:
+                parts.append(f"  - {sign}")
+        if r.get("home_care_steps"):
+            parts.append("\nHome Care Steps:")
+            for step in r["home_care_steps"][:3]:
+                parts.append(f"  - {step}")
+        if r.get("documentation"):
+            documentation = r["documentation"]
+            parts.append("\nDocumentation Summary:")
+            if documentation.get("chief_complaint"):
+                parts.append(f"  Chief Complaint: {documentation['chief_complaint']}")
+            if documentation.get("duration"):
+                parts.append(f"  Duration: {documentation['duration']}")
+            if documentation.get("key_vitals_noted"):
+                parts.append(f"  Vitals: {documentation['key_vitals_noted']}")
+            if documentation.get("action_taken"):
+                parts.append(f"  Action Taken: {documentation['action_taken']}")
+        if r.get("asha_script"):
+            parts.append("\nSuggested ASHA Script:")
+            parts.append(r["asha_script"])
+
+    # Doctor list
+    if state.get("doctor_list"):
+        parts.append("\nNEARBY DOCTORS")
+        parts.append("=" * 40)
+        for d in state["doctor_list"]:
+            name = d.get('name', '')
+            parts.append(f"{name} | {d.get('specialty','')} | {d.get('phone','')}")
+            parts.append(f"  {d.get('address','')}")
+
+    if error and not parts:
+        return {"aggregated_response": _build_error_response(state)}
+
+    if error:
+        parts.append("\nSYSTEM NOTICE")
+        parts.append("=" * 40)
+        parts.append(_build_error_response(state))
+
+    if not parts:
+        parts.append("I was unable to process your request. Please try again.")
+
+    response = "\n".join(parts) + DOCTOR_REFERRAL_FOOTER
+    return {"aggregated_response": response}
+
+# ── Graph Assembly ─────────────────────────────────────────────────────────
+def build_graph() -> StateGraph:
+    graph = StateGraph(MedMASState)
+
+    graph.add_node("crisis_guard",        crisis_guard_node)
+    graph.add_node("language_detector",   language_detector_node)
+    graph.add_node("intent_classifier",   intent_classifier_node)
+    graph.add_node("symptom_checker",     symptom_checker_node)
+    graph.add_node("disease_predictor",   disease_predictor_node)
+    graph.add_node("empathy_chatbot",     empathy_chatbot_node)
+    graph.add_node("health_scorer",       health_scorer_node)
+    graph.add_node("asha_copilot",        asha_copilot_node)
+    graph.add_node("offtopic_responder",  offtopic_responder_node)
+    graph.add_node("session_memory",      session_memory_node)
+    graph.add_node("doctor_finder",       doctor_finder_node)
+    graph.add_node("response_aggregator", response_aggregator_node)
+    graph.add_node("multilingual_output", multilingual_output_node)
+
+    # Entry point: crisis guard runs FIRST on every request
+    graph.set_entry_point("crisis_guard")
+    graph.add_edge("crisis_guard",      "language_detector")
+    graph.add_edge("language_detector", "intent_classifier")
+
+    # Conditional routing
+    graph.add_conditional_edges(
+        "intent_classifier",
+        route_by_intent,
+        {
+            "symptom_checker":    "symptom_checker",
+            "disease_predictor":  "disease_predictor",
+            "empathy_chatbot":    "empathy_chatbot",
+            "health_scorer":      "health_scorer",
+            "asha_copilot":       "asha_copilot",
+            "doctor_finder":      "doctor_finder",
+            "offtopic_responder": "offtopic_responder",
+        }
+    )
+
+    # Every agent → session_memory → doctor_finder → aggregator → output
+    for agent in ["symptom_checker", "disease_predictor", "empathy_chatbot",
+                  "health_scorer", "asha_copilot", "offtopic_responder"]:
+        graph.add_edge(agent, "session_memory")
+
+    graph.add_edge("doctor_finder", "response_aggregator")
+    graph.add_edge("session_memory",      "doctor_finder")
+    graph.add_edge("response_aggregator", "multilingual_output")
+    graph.add_edge("multilingual_output", END)
+
+    return graph.compile()
+
+
+medmas_graph = build_graph()
+
+
+async def run_pipeline(
+    raw_input:       str,
+    media_type:      str   = "text",
+    pdf_bytes:       bytes = None,
+    user_id:         str   = None,
+    user_district:   str   = None,
+    user_phone:      str   = None,
+    user_lat:        float = None,
+    user_lng:        float = None,
+    asha_mode:       bool  = False,
+    asha_worker_id:  str   = None,
+    patient_id:      str   = None,
+    session_context: dict  = None,
+    session_history: list  = None,
+    hint_intent:     str   = None,
+) -> MedMASState:
+    state = initial_state(
+        raw_input=raw_input,
+        media_type=media_type,
+        pdf_bytes=pdf_bytes,
+        user_id=user_id,
+        user_district=user_district,
+        user_phone=user_phone,
+        user_lat=user_lat,
+        user_lng=user_lng,
+        asha_mode=asha_mode,
+        asha_worker_id=asha_worker_id,
+        patient_id=patient_id,
+        session_context=session_context or {},
+        session_history=session_history or [],
+        hint_intent=hint_intent,
+    )
+    LOGGER.info(
+        "run_pipeline start "
+        f"user_id={user_id or 'anon'} media={media_type} hint_intent={hint_intent} asha_mode={asha_mode}"
+    )
+    result = await medmas_graph.ainvoke(state)
+    LOGGER.info(
+        "run_pipeline end "
+        f"intent={result.get('intent')} triage={result.get('triage_level')} trace={result.get('processing_trace')}"
+    )
+    return result
