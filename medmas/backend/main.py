@@ -91,7 +91,25 @@ def _parse_json_field(raw: Optional[str], default):
     return value if isinstance(value, type(default)) else default
 
 
-def _build_assistant_meta(result: dict, *, is_asha: bool = False) -> dict:
+def _get_registered_doctors(result: dict, district: Optional[str]) -> list:
+    specialty = (
+        (result.get("symptom_result") or {}).get("recommended_specialty")
+        or ((result.get("symptom_result") or {}).get("triage") or {}).get("specialty")
+        or ""
+    )
+    if specialty:
+        doctors = match_doctors(specialty=specialty, district=district or "", limit=5)
+        if doctors:
+            return doctors
+    return list_doctors(district=district or "", verified_only=True)[:5]
+
+
+def _build_assistant_meta(
+    result: dict,
+    *,
+    is_asha: bool = False,
+    registered_doctors: Optional[list] = None,
+) -> dict:
     meta = {
         "triage": result.get("triage_level", "routine"),
         "intent": "asha" if is_asha else result.get("intent", ""),
@@ -104,6 +122,8 @@ def _build_assistant_meta(result: dict, *, is_asha: bool = False) -> dict:
         meta["symptomResult"] = result.get("symptom_result")
     if result.get("asha_result"):
         meta["asha"] = result.get("asha_result")
+    if registered_doctors:
+        meta["registeredDoctors"] = registered_doctors
     return meta
 
 
@@ -143,10 +163,19 @@ def _sort_by_created_at(rows: list[dict], *, reverse: bool = False) -> list[dict
 
 
 def _build_session_consultation(user_id: Optional[str], session_id: Optional[str]) -> Optional[dict]:
-    if not user_id or not session_id:
+    if not user_id:
         return None
 
-    cases = list_cases_for_session(user_id, session_id)
+    cases = list_cases_for_session(user_id, session_id) if session_id else []
+    if not cases:
+        user_cases = list_cases_for_user(user_id)
+        active_cases = [case for case in user_cases if case.get("status") != "closed"]
+        cases = active_cases or user_cases
+        cases = sorted(
+            cases,
+            key=lambda case: case.get("updated_at") or case.get("created_at") or "",
+            reverse=True,
+        )[:5]
     if not cases:
         return None
 
@@ -256,6 +285,7 @@ class ChatResponse(BaseModel):
     triage_level:      str
     intent:            str
     doctor_list:       list = []
+    registered_doctors: list = []
     health_score:      Optional[int] = None
     crisis_detected:   bool = False
     symptom_result:    Optional[dict] = None
@@ -317,6 +347,12 @@ async def chat(req: ChatRequest):
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+    registered_doctors = []
+    try:
+        registered_doctors = _get_registered_doctors(result, req.user_district)
+    except Exception:
+        pass
+
     try:
         _persist_chat_turn(
             user_id=req.user_id,
@@ -327,7 +363,7 @@ async def chat(req: ChatRequest):
             user_content=req.message,
             user_meta={},
             assistant_content=result.get("final_response", ""),
-            assistant_meta=_build_assistant_meta(result),
+            assistant_meta=_build_assistant_meta(result, registered_doctors=registered_doctors),
         )
     except Exception:
         pass
@@ -344,6 +380,7 @@ async def chat(req: ChatRequest):
         triage_level=result.get("triage_level", "routine"),
         intent=result.get("intent", ""),
         doctor_list=result.get("doctor_list") or [],
+        registered_doctors=registered_doctors,
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
@@ -436,6 +473,12 @@ async def chat_upload(
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+    registered_doctors = []
+    try:
+        registered_doctors = _get_registered_doctors(result, user_district)
+    except Exception:
+        pass
+
     try:
         _persist_chat_turn(
             user_id=user_id,
@@ -446,7 +489,7 @@ async def chat_upload(
             user_content=message or "[Uploaded files]",
             user_meta={"files": uploaded_files_meta} if uploaded_files_meta else {},
             assistant_content=result.get("final_response", ""),
-            assistant_meta=_build_assistant_meta(result),
+            assistant_meta=_build_assistant_meta(result, registered_doctors=registered_doctors),
         )
     except Exception:
         pass
@@ -463,6 +506,7 @@ async def chat_upload(
         triage_level=result.get("triage_level", "routine"),
         intent=result.get("intent", ""),
         doctor_list=result.get("doctor_list") or [],
+        registered_doctors=registered_doctors,
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
@@ -841,6 +885,19 @@ def get_chat_session_detail(user_id: str, session_id: str):
         raise HTTPException(503, str(e))
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+@app.get("/api/chat/consultation/{user_id}")
+def get_chat_consultation(user_id: str):
+    if not supabase:
+        raise HTTPException(503, "Supabase not configured")
+    try:
+        return {"consultation": _build_session_consultation(user_id, None)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 
 @app.delete("/api/chat/sessions/{user_id}/{session_id}")
 def remove_chat_session(user_id: str, session_id: str):

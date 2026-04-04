@@ -71,6 +71,7 @@ function mapApiMessage(m) {
     lang: meta.lang || undefined,
     symptomResult: meta.symptomResult || undefined,
     asha: meta.asha || undefined,
+    registeredDoctors: meta.registeredDoctors || [],
   };
 }
 
@@ -103,6 +104,26 @@ async function fetchSessionDetailFromAPI(userId, sessionId) {
       messages: (data.messages || []).map(mapApiMessage),
       consultation: mapConsultationPayload(data.consultation),
     };
+  } catch { return null; }
+}
+
+async function fetchConsultationFromAPI(userId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/consultation/${userId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return mapConsultationPayload(data.consultation);
+  } catch { return null; }
+}
+
+async function fetchDistrictDoctorsFromAPI(district) {
+  try {
+    const qs = new URLSearchParams({ verified_only: "true" });
+    if (district) qs.set("district", district);
+    const res = await fetch(`${API_BASE}/api/doctors/list?${qs}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.doctors || [];
   } catch { return null; }
 }
 
@@ -323,6 +344,8 @@ export default function Chat() {
   const [sessions, setSessions] = useState(() => readSessionsLocal());
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [consultation, setConsultation] = useState(null);
+  const [districtDoctors, setDistrictDoctors] = useState([]);
+  const [districtDoctorsLoading, setDistrictDoctorsLoading] = useState(false);
   const currentSessionRef = useRef(null); // mirror for async closures
 
   const storedUser = localStorage.getItem("medmas_user");
@@ -341,6 +364,26 @@ export default function Chat() {
       }
     });
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId || currentSessionId || tab !== "chat") return;
+    fetchConsultationFromAPI(userId).then((payload) => {
+      if (payload && !currentSessionRef.current) {
+        setConsultation(payload);
+      }
+    });
+  }, [currentSessionId, tab, userId]);
+
+  useEffect(() => {
+    if (tab !== "chat") return;
+    const effectiveDistrict = district || user?.district || "";
+    setDistrictDoctorsLoading(true);
+    fetchDistrictDoctorsFromAPI(effectiveDistrict)
+      .then((doctors) => {
+        setDistrictDoctors(doctors || []);
+      })
+      .finally(() => setDistrictDoctorsLoading(false));
+  }, [district, tab, user?.district]);
 
   // Session helpers
   const persistExchange = useCallback((sessionId, userMsg, assistantMsg) => {
@@ -459,6 +502,20 @@ export default function Chat() {
 
   function toggleConsultScope(s) {
     setConsultScope(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
+  }
+
+  function getConsultRequestSourceMessage() {
+    const latestAssistant = [...messagesRef.current].reverse().find((msg) => msg.role === "assistant");
+    if (latestAssistant) return latestAssistant;
+
+    const latestUser = [...messagesRef.current].reverse().find((msg) => msg.role === "user");
+    if (latestUser) return latestUser;
+
+    return {
+      text: `Consultation requested from the district doctors panel for ${district || user?.district || "the selected district"}.`,
+      triage: "routine",
+      symptomResult: null,
+    };
   }
 
   async function submitConsultRequest(msg) {
@@ -866,7 +923,7 @@ export default function Chat() {
         crisis: data.crisis_detected, doctors: data.doctor_list,
         lang: data.original_language,
         symptomResult: data.symptom_result || null,
-        registeredDoctors: [],
+        registeredDoctors: data.registered_doctors || [],
       };
       setMessages(prev => [...prev, assistantMsg]);
       setConsultation(mapConsultationPayload(data.consultation));
@@ -874,22 +931,6 @@ export default function Chat() {
         sessionContext: data.session_context || {},
         updatedAt: new Date().toISOString(),
       });
-
-      // Fetch MedMAS-registered verified doctors by district (non-blocking)
-      if (data.doctor_list?.length > 0 || data.intent === "doctor" || data.intent === "symptom") {
-        const qs = new URLSearchParams({ verified_only: "true" });
-        if (district || user?.district) qs.set("district", district || user?.district);
-        fetch(`${API_BASE}/api/doctors/list?${qs}`)
-          .then(r => r.json())
-          .then(d => {
-            if (d.doctors?.length > 0) {
-              setMessages(prev => prev.map(m =>
-                m.id === assistantMsg.id ? { ...m, registeredDoctors: d.doctors } : m
-              ));
-            }
-          })
-          .catch(() => {});
-      }
 
       // Persist exchange using the same userMsg object shown in the UI
       persistExchange(sessionId, userMsg, assistantMsg);
@@ -1038,7 +1079,11 @@ export default function Chat() {
   const doctorMessages = consultationThread.filter(msg => msg.sender_type === "doctor");
   const consultationPrescriptions = consultation?.prescriptions || [];
   const canReplyToDoctor = ["accepted", "in_progress"].includes(activeConsultationCase?.status || "");
-  const hasMessages = messages.length > 0 || doctorMessages.length > 0 || consultationPrescriptions.length > 0;
+  const hasMessages =
+    messages.length > 0 ||
+    doctorMessages.length > 0 ||
+    consultationPrescriptions.length > 0 ||
+    districtDoctors.length > 0;
   const agentCount = Object.keys(AGENT_INFO).length;
   const selectedPatient = ashaPatients.find(
     patient => normalizePatientId(patient.id) === normalizePatientId(selectedPatientId)
@@ -1504,6 +1549,155 @@ export default function Chat() {
               </div>
             </div>
           )}
+            {tab === "chat" && (districtDoctorsLoading || districtDoctors.length > 0) && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 overflow-hidden rounded-[28px] border border-indigo-200/70 bg-white/85 shadow-[0_18px_60px_rgba(79,70,229,0.10)] backdrop-blur-xl"
+              >
+                <div className="border-b border-indigo-100/80 bg-gradient-to-r from-indigo-50 via-sky-50 to-cyan-50 px-5 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-indigo-700">
+                        District Doctors
+                      </p>
+                      <h3 className="mt-1 text-base font-semibold text-neutral-900">
+                        MedMAS doctors in {district || user?.district || "your district"}
+                      </h3>
+                      <p className="mt-1 text-xs text-neutral-500">
+                        District-filtered online doctors available for consultation from this chat.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-indigo-200 bg-white/80 px-3 py-2 text-right">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Available</p>
+                      <p className="mt-1 text-sm font-semibold text-indigo-700">
+                        {districtDoctorsLoading ? "Loading..." : districtDoctors.length}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 px-5 py-4">
+                  {districtDoctorsLoading ? (
+                    <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-5 text-sm text-neutral-500">
+                      Loading district doctors...
+                    </div>
+                  ) : (
+                    districtDoctors.slice(0, 4).map((d) => {
+                      const mapsUrl = getDoctorMapsUrl(d, district || user?.district);
+                      const isDistrictConsulting = consultMsgId === "district-doctors" && consultDoctorId === d.id;
+                      return (
+                        <div key={d.id} className="overflow-hidden rounded-xl border border-indigo-200/50 bg-indigo-50/60 text-neutral-900 backdrop-blur-sm">
+                          <div className="flex items-center gap-3 px-4 py-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-xs font-bold text-white shadow-sm">
+                              {(d.name || "D")[0]}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-semibold text-neutral-900">{d.name}</p>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                                  {d.specialty}
+                                </span>
+                                {d.district && (
+                                  <span className="text-[10px] text-neutral-600">{d.district}</span>
+                                )}
+                                {d.bio && (
+                                  <span className="truncate text-[10px] text-neutral-600 max-w-[220px]">{d.bio}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <a
+                                href={mapsUrl || "#"}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => { if (!mapsUrl) e.preventDefault(); }}
+                                className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-[10px] font-semibold text-indigo-700 transition hover:bg-indigo-50"
+                              >
+                                Map
+                              </a>
+                              {!isDistrictConsulting && consultStep !== "done" && (
+                                <button
+                                  onClick={() => openConsultConsent("district-doctors", d.id, d.name)}
+                                  className="rounded-lg bg-indigo-200 px-3 py-1.5 text-[10px] font-semibold text-neutral-950 transition hover:bg-indigo-300"
+                                >
+                                  Consult
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {isDistrictConsulting && consultStep === "consent" && (
+                            <div className="border-t border-indigo-100/60 px-4 pb-3 pt-2">
+                              <p className="mb-2 text-[11px] font-medium text-neutral-800">
+                                Share with Dr. {consultDoctorName}:
+                              </p>
+                              <div className="mb-2 space-y-1">
+                                {[
+                                  { key: "chat", label: "Chat history & symptoms" },
+                                  { key: "reports", label: "Lab reports & documents" },
+                                  { key: "contact", label: "Contact information" },
+                                ].map(({ key, label }) => (
+                                  <label key={key} className="flex cursor-pointer items-center gap-2 text-[11px] text-neutral-800">
+                                    <input
+                                      type="checkbox"
+                                      checked={consultScope.includes(key)}
+                                      onChange={() => toggleConsultScope(key)}
+                                      className="rounded"
+                                    />
+                                    {label}
+                                  </label>
+                                ))}
+                              </div>
+                              {consultError && <p className="mb-1 text-[10px] text-red-500">{consultError}</p>}
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => submitConsultRequest(getConsultRequestSourceMessage())}
+                                  disabled={!consultScope.length}
+                                  className="flex-1 rounded-lg bg-indigo-200 px-3 py-1.5 text-[11px] font-semibold text-neutral-950 transition hover:bg-indigo-300 disabled:opacity-40"
+                                >
+                                  Confirm & Request
+                                </button>
+                                <button
+                                  onClick={() => { setConsultStep("idle"); setConsultMsgId(null); setConsultDoctorId(null); }}
+                                  className="rounded-lg px-3 py-1.5 text-[11px] text-neutral-700 transition hover:text-neutral-900"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {isDistrictConsulting && consultStep === "creating" && (
+                            <div className="flex items-center gap-2 border-t border-indigo-100/60 px-4 pb-3 pt-2">
+                              <span className="auth-spinner" />
+                              <span className="text-[11px] text-neutral-800">Sending request to Dr. {consultDoctorName}...</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {!districtDoctorsLoading && districtDoctors.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-5 text-sm text-neutral-500">
+                      No verified MedMAS doctors found for {district || user?.district || "this district"}.
+                    </div>
+                  )}
+
+                  {consultMsgId === "district-doctors" && consultStep === "done" && consultCase && (
+                    <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/80 p-3">
+                      <p className="text-xs font-semibold text-emerald-800">
+                        Consultation sent to Dr. {consultDoctorName}
+                      </p>
+                      <p className="mt-0.5 text-[10px] text-neutral-700">
+                        Doctor messages and prescriptions will appear in the Doctor Updates section.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
             {tab === "chat" && activeConsultationCase && (
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
