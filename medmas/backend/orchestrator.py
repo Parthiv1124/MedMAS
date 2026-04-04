@@ -11,7 +11,7 @@ from agents.disease_predictor import disease_predictor_node
 from agents.empathy_chatbot import empathy_chatbot_node
 from agents.health_scorer   import health_scorer_node
 from agents.asha_copilot    import asha_copilot_node
-from services.doctor_finder import find_doctors
+from services.doctor_finder import find_doctors, get_known_districts
 from services.osm_doctor_finder import find_nearby_doctors
 
 DOCTOR_REFERRAL_FOOTER = (
@@ -79,7 +79,7 @@ def intent_classifier_node(state: MedMASState) -> dict:
         "mental":    ["empathy_chatbot"],
         "lifestyle": ["health_scorer"],
         "asha":      ["asha_copilot"],
-        "doctor":    ["symptom_checker"],
+        "doctor":    ["doctor_finder"],
         "reminder":  ["health_scorer"],
         "offtopic":  ["offtopic_responder"],
     }
@@ -89,7 +89,7 @@ def intent_classifier_node(state: MedMASState) -> dict:
 def route_by_intent(state: MedMASState) -> str:
     route_map = {
         "symptom":   "symptom_checker",
-        "doctor":    "symptom_checker",
+        "doctor":    "doctor_finder",
         "lab":       "disease_predictor",
         "mental":    "empathy_chatbot",
         "lifestyle": "health_scorer",
@@ -167,10 +167,38 @@ def session_memory_node(state: MedMASState) -> dict:
     )
     return {"session_context": ctx}
 
+
+def _infer_specialty_from_query(query: str) -> str:
+    query = (query or "").lower()
+    specialty_keywords = {
+        "Cardiology": ["cardio", "heart", "chest"],
+        "Neurology": ["neuro", "brain", "nerve", "stroke", "seizure"],
+        "Endocrinology": ["diabet", "thyroid", "hormone", "endocr"],
+        "Psychiatry": ["psychiat", "mental", "anxiety", "depression", "stress"],
+        "Paediatrics": ["child", "children", "kid", "kids", "pediatric", "paediatric"],
+        "Obstetrics": ["pregnan", "gyn", "women", "obstetric", "delivery"],
+    }
+    for specialty, keywords in specialty_keywords.items():
+        if any(keyword in query for keyword in keywords):
+            return specialty
+    return "General"
+
+
+def _infer_district_from_query(query: str) -> str:
+    query = (query or "").lower()
+    for district in get_known_districts():
+        if district.lower() in query:
+            return district
+    return ""
+
 # ── Doctor Finder Node ─────────────────────────────────────────────────────
 async def doctor_finder_node(state: MedMASState) -> dict:
     if state.get("doctor_list"):
         return {"doctor_list": state["doctor_list"]}  # Keep existing
+    if state.get("error") and not any(
+        state.get(key) for key in ("symptom_result", "disease_result", "asha_result")
+    ):
+        return {"doctor_list": []}
 
     specialty = "General"
     if state.get("symptom_result"):
@@ -183,6 +211,12 @@ async def doctor_finder_node(state: MedMASState) -> dict:
             specialty = "Cardiology"
     elif state.get("asha_result"):
         specialty = state["asha_result"].get("refer_specialty", "General")
+    elif state.get("intent") == "doctor":
+        specialty = _infer_specialty_from_query(state.get("translated_input", ""))
+
+    query_district = ""
+    if state.get("intent") == "doctor":
+        query_district = _infer_district_from_query(state.get("translated_input", ""))
 
     # Try OSM real nearby doctors if user lat/lng is available
     user_lat = state.get("user_lat")
@@ -198,10 +232,13 @@ async def doctor_finder_node(state: MedMASState) -> dict:
         except Exception as e:
             print(f"[DoctorFinder] OSM failed: {e}")
     else:
-        print(f"[DoctorFinder] No coords in state, using CSV. district={state.get('user_district')}")
+        print(
+            f"[DoctorFinder] No coords in state, using CSV. "
+            f"query_district={query_district or 'none'} state_district={state.get('user_district')}"
+        )
 
     # Fallback: static CSV doctors
-    district = state.get("user_district") or ""
+    district = query_district or state.get("user_district") or ""
     # 1. Best: same district + same specialty
     doctors = find_doctors(specialty=specialty, district=district)
     # 2. Same district, any specialty (at least they are nearby)
@@ -213,10 +250,49 @@ async def doctor_finder_node(state: MedMASState) -> dict:
     return {"doctor_list": doctors}
 
 # ── Response Aggregator ────────────────────────────────────────────────────
+def _build_error_response(state: MedMASState) -> str:
+    """Create a user-facing message when an agent fails."""
+    error = (state.get("error") or "I could not complete that request.").strip()
+    intent = state.get("intent") or "symptom"
+
+    intent_messages = {
+        "symptom": (
+            "I could not complete the symptom assessment right now. "
+            "Please resend the main symptoms, duration, and severity."
+        ),
+        "lab": (
+            "I could not analyse the lab report right now. "
+            "Please resend the report or provide the main lab values in text."
+        ),
+        "mental": (
+            "I could not complete the mental health support response right now. "
+            "If you are in immediate danger, call 112 or contact iCall at 9152987821."
+        ),
+        "lifestyle": (
+            "I could not generate the health score right now. "
+            "Please resend your sleep, activity, diet, stress, and habit details."
+        ),
+        "asha": (
+            "I could not complete the ASHA triage right now. "
+            "Please review the patient observations and try again."
+        ),
+        "doctor": (
+            "I could not complete the nearby doctor search right now. "
+            "Please try again with your district or live location enabled."
+        ),
+    }
+    base_message = intent_messages.get(
+        intent,
+        "I could not complete that request right now. Please try again."
+    )
+    return f"{base_message}\n\nTechnical detail: {error}"
+
+
 def response_aggregator_node(state: MedMASState) -> dict:
     parts  = []
     triage = state.get("triage_level", "routine")
     ctx    = state.get("session_context", {})
+    error  = state.get("error")
 
     # Crisis alert banner
     if state.get("crisis_detected"):
@@ -340,6 +416,14 @@ def response_aggregator_node(state: MedMASState) -> dict:
             parts.append(f"{name} | {d.get('specialty','')} | {d.get('phone','')}")
             parts.append(f"  {d.get('address','')}")
 
+    if error and not parts:
+        return {"aggregated_response": _build_error_response(state)}
+
+    if error:
+        parts.append("\nSYSTEM NOTICE")
+        parts.append("=" * 40)
+        parts.append(_build_error_response(state))
+
     if not parts:
         parts.append("I was unable to process your request. Please try again.")
 
@@ -379,6 +463,7 @@ def build_graph() -> StateGraph:
             "empathy_chatbot":    "empathy_chatbot",
             "health_scorer":      "health_scorer",
             "asha_copilot":       "asha_copilot",
+            "doctor_finder":      "doctor_finder",
             "offtopic_responder": "offtopic_responder",
         }
     )
@@ -388,8 +473,8 @@ def build_graph() -> StateGraph:
                   "health_scorer", "asha_copilot", "offtopic_responder"]:
         graph.add_edge(agent, "session_memory")
 
+    graph.add_edge("doctor_finder", "response_aggregator")
     graph.add_edge("session_memory",      "doctor_finder")
-    graph.add_edge("doctor_finder",       "response_aggregator")
     graph.add_edge("response_aggregator", "multilingual_output")
     graph.add_edge("multilingual_output", END)
 

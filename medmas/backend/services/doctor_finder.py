@@ -4,6 +4,11 @@ from config import DOCTORS_CSV_PATH
 
 doctors_df = pd.read_csv(DOCTORS_CSV_PATH)
 
+
+def get_known_districts() -> list[str]:
+    """Return all distinct districts present in doctors.csv."""
+    return sorted(doctors_df["district"].dropna().astype(str).unique().tolist())
+
 def find_doctors(specialty: str, district: str = "", limit: int = 3) -> list:
     """
     Filter doctors.csv by specialty and/or district.

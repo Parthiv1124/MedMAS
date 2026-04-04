@@ -11,7 +11,6 @@ import logo from "../assets/logo.png";
 // Session localStorage helpers
 const SESSIONS_KEY = "medmas_sessions";
 const msgKey = (id) => `medmas_session_${id}`;
-
 function readSessions() {
   try {
     const raw = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
@@ -204,6 +203,9 @@ export default function Chat() {
   const [tab, setTab]                     = useState("chat");
   const [ashaPatients, setAshaPatients]   = useState([]);
   const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [assessmentHistory, setAssessmentHistory] = useState([]);
+  const [assessmentHistoryLoading, setAssessmentHistoryLoading] = useState(false);
+  const [assessmentHistoryError, setAssessmentHistoryError] = useState("");
   const [ashaQueueLoading, setAshaQueueLoading] = useState(false);
   const [ashaQueueError, setAshaQueueError] = useState("");
   const [creatingPatient, setCreatingPatient] = useState(false);
@@ -220,6 +222,7 @@ export default function Chat() {
   const bottomRef                         = useRef(null);
   const messagesRef = useRef([]);
   const requestInFlightRef = useRef(false);
+  const selectedPatientSyncReadyRef = useRef(false);
 
   // Sidebar / session state
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -356,6 +359,23 @@ export default function Chat() {
     loadAshaQueue();
   }, [tab, ashaWorkerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!ashaWorkerId || !selectedPatientId) {
+      setAssessmentHistory([]);
+      setAssessmentHistoryError("");
+      return;
+    }
+
+    void loadAssessmentHistory(selectedPatientId);
+  }, [ashaWorkerId, selectedPatientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!ashaWorkerId || !selectedPatientSyncReadyRef.current) return;
+    void persistSelectedPatient(selectedPatientId || null).catch(err => {
+      setAshaQueueError(err.message || "Unable to save selected patient.");
+    });
+  }, [ashaWorkerId, selectedPatientId]);
+
   function queueAssistantError(message) {
     setMessages(prev => [...prev, {
       id: Date.now() + 1,
@@ -379,6 +399,7 @@ export default function Chat() {
     setAshaQueueError("");
 
     try {
+      const persistedSelection = await loadSelectedPatientFromServer();
       const res = await fetch(`${API_BASE}/api/asha/queue/${encodeURIComponent(ashaWorkerId)}`);
       const data = await res.json();
       if (!res.ok || data.detail) {
@@ -388,19 +409,51 @@ export default function Chat() {
       const patients = data.patients || [];
       setAshaPatients(patients);
 
+      const activeSelection = normalizePatientId(persistedSelection || selectedPatientId);
       const currentSelectionExists = patients.some(
-        patient => normalizePatientId(patient.id) === normalizePatientId(selectedPatientId)
+        patient => normalizePatientId(patient.id) === activeSelection
       );
 
       if (patients.length === 0) {
         setSelectedPatientId("");
-      } else if (!currentSelectionExists) {
+      } else if (currentSelectionExists && activeSelection) {
+        setSelectedPatientId(activeSelection);
+      } else {
         setSelectedPatientId(normalizePatientId(patients[0].id));
       }
+      selectedPatientSyncReadyRef.current = true;
     } catch (err) {
       setAshaQueueError(err.message || "Unable to load ASHA queue.");
     } finally {
       setAshaQueueLoading(false);
+    }
+  }
+
+  async function loadSelectedPatientFromServer() {
+    if (!ashaWorkerId) return "";
+
+    const res = await fetch(`${API_BASE}/api/asha/selected-patient/${encodeURIComponent(ashaWorkerId)}`);
+    const data = await res.json();
+    if (!res.ok || data.detail) {
+      throw new Error(data.detail || "Unable to load selected patient.");
+    }
+    return normalizePatientId(data.patient_id || "");
+  }
+
+  async function persistSelectedPatient(patientId) {
+    if (!ashaWorkerId) return;
+
+    const res = await fetch(`${API_BASE}/api/asha/selected-patient`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        asha_worker_id: ashaWorkerId,
+        patient_id: patientId || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.detail) {
+      throw new Error(data.detail || "Unable to save selected patient.");
     }
   }
 
@@ -570,6 +623,27 @@ export default function Chat() {
     }
   }
 
+  async function loadAssessmentHistory(patientId) {
+    if (!patientId) return;
+
+    setAssessmentHistoryLoading(true);
+    setAssessmentHistoryError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/asha/history/${encodeURIComponent(patientId)}`);
+      const data = await res.json();
+      if (!res.ok || data.detail) {
+        throw new Error(data.detail || "Unable to load assessment history.");
+      }
+      setAssessmentHistory(data.assessments || []);
+    } catch (err) {
+      setAssessmentHistory([]);
+      setAssessmentHistoryError(err.message || "Unable to load assessment history.");
+    } finally {
+      setAssessmentHistoryLoading(false);
+    }
+  }
+
   async function sendASHA(text) {
     if (requestInFlightRef.current) return;
 
@@ -638,6 +712,8 @@ export default function Chat() {
       };
       setMessages(prev => [...prev, assistantMsg]);
       persistExchange(sessionId, userMsg, assistantMsg);
+      await loadAshaQueue();
+      await loadAssessmentHistory(selectedPatientId);
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
@@ -825,22 +901,25 @@ export default function Chat() {
         <div className="flex w-full max-w-5xl flex-col gap-4 px-3 pb-24 sm:px-4 sm:pb-28">
 
           {tab === "asha" && (
-            <div className="glass-liquid space-y-4 rounded-3xl border border-white/45 p-4 shadow-[0_20px_60px_rgba(245,158,11,0.12)]">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="glass-liquid space-y-5 rounded-[32px] border border-white/50 p-4 shadow-[0_24px_70px_rgba(245,158,11,0.14)] sm:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-600">
                     ASHA Workspace
                   </p>
-                  <h3 className="mt-1 text-base font-semibold text-neutral-900">
+                  <h3 className="mt-1 text-lg font-semibold text-neutral-900">
                     Patient Queue and Field Assessment
                   </h3>
-                  <p className="mt-1 text-sm text-neutral-500">
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-500">
                     Link each ASHA assessment to a real patient record before sending observations to the orchestrator.
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                   <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-medium text-amber-700">
                     Worker: {user?.name || user?.email || "Not signed in"}
+                  </span>
+                  <span className="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-[11px] font-medium text-neutral-700">
+                    {selectedPatient ? `Patient: ${selectedPatient.name}` : "No patient selected"}
                   </span>
                   <button
                     type="button"
@@ -865,12 +944,29 @@ export default function Chat() {
                 </div>
               )}
 
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-                <div className="space-y-3 rounded-2xl border border-white/50 bg-white/55 p-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">Queue</p>
+                  <p className="mt-1 text-sm font-semibold text-neutral-900">{ashaPatients.length} active patients</p>
+                </div>
+                <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">Selected</p>
+                  <p className="mt-1 text-sm font-semibold text-neutral-900">
+                    {selectedPatient ? selectedPatient.name : "Waiting for selection"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-neutral-400">History</p>
+                  <p className="mt-1 text-sm font-semibold text-neutral-900">{assessmentHistory.length} saved records</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+                <div className="rounded-[28px] border border-white/55 bg-white/60 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-xs font-semibold text-neutral-900">Assigned Patients</p>
-                      <p className="text-[11px] text-neutral-500">Active queue from Supabase</p>
+                      <p className="text-xs font-semibold text-neutral-900">Patient Queue</p>
+                      <p className="text-[11px] text-neutral-500">Active records from Supabase</p>
                     </div>
                     <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-[10px] font-semibold text-white">
                       {ashaPatients.length}
@@ -878,16 +974,16 @@ export default function Chat() {
                   </div>
 
                   {ashaQueueLoading ? (
-                    <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-5 text-sm text-neutral-500">
+                    <div className="mt-3 rounded-2xl border border-dashed border-neutral-200 px-4 py-5 text-sm text-neutral-500">
                       Loading patient queue...
                     </div>
                   ) : ashaPatients.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50/70 px-4 py-5 text-sm text-amber-700">
+                    <div className="mt-3 rounded-2xl border border-dashed border-amber-200 bg-amber-50/70 px-4 py-5 text-sm text-amber-700">
                       No active patients in this queue yet. Add the first patient below.
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {ashaPatients.slice(0, 6).map(patient => {
+                    <div className="mt-3 max-h-[540px] space-y-2 overflow-y-auto pr-1">
+                      {ashaPatients.map(patient => {
                         const patientId = normalizePatientId(patient.id);
                         const isSelected = patientId === normalizePatientId(selectedPatientId);
                         return (
@@ -923,11 +1019,12 @@ export default function Chat() {
                   )}
                 </div>
 
-                <div className="space-y-3 rounded-2xl border border-white/50 bg-white/55 p-4">
+                <div className="space-y-4">
+                  <div className="rounded-[28px] border border-white/55 bg-white/60 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <p className="text-xs font-semibold text-neutral-900">Selected Patient</p>
-                      <p className="text-[11px] text-neutral-500">This patient will receive the next assessment</p>
+                      <p className="text-[11px] text-neutral-500">Use this record for the next field assessment</p>
                     </div>
                     <button
                       type="button"
@@ -959,15 +1056,84 @@ export default function Chat() {
                           {selectedPatient.notes}
                         </p>
                       )}
+                      <div className="mt-3 rounded-2xl border border-white/60 bg-white/70 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                              Assessment History
+                            </p>
+                            <p className="text-[11px] text-neutral-500">
+                              Previous database records for this patient
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-[10px] font-semibold text-white">
+                            {assessmentHistory.length}
+                          </span>
+                        </div>
+                        {assessmentHistoryLoading ? (
+                          <div className="mt-3 rounded-xl border border-dashed border-neutral-200 px-3 py-3 text-[11px] text-neutral-500">
+                            Loading assessment history...
+                          </div>
+                        ) : assessmentHistoryError ? (
+                          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-[11px] text-red-700">
+                            {assessmentHistoryError}
+                          </div>
+                        ) : assessmentHistory.length === 0 ? (
+                          <div className="mt-3 rounded-xl border border-dashed border-neutral-200 px-3 py-3 text-[11px] text-neutral-500">
+                            No previous assessments found for this patient.
+                          </div>
+                        ) : (
+                          <div className="mt-3 space-y-2">
+                            {assessmentHistory.slice(0, 4).map(item => (
+                              <div
+                                key={item.id || `${item.created_at}-${item.triage_decision || "entry"}`}
+                                className="rounded-xl border border-white/60 bg-white/80 px-3 py-3"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase text-amber-700">
+                                    {formatLabel(item.triage_decision || "recorded")}
+                                  </span>
+                                  <span className="text-[10px] text-neutral-500">
+                                    {item.created_at ? new Date(item.created_at).toLocaleString() : "Saved in database"}
+                                  </span>
+                                </div>
+                                {item.refer_to && (
+                                  <p className="mt-2 text-[11px] text-neutral-600">
+                                    Refer to: {item.refer_to}
+                                  </p>
+                                )}
+                                {item.documentation?.chief_complaint && (
+                                  <p className="mt-1 text-[11px] text-neutral-600">
+                                    Complaint: {item.documentation.chief_complaint}
+                                  </p>
+                                )}
+                                {item.danger_signs?.length > 0 && (
+                                  <p className="mt-1 text-[11px] text-red-700">
+                                    Danger signs: {item.danger_signs.slice(0, 2).join(", ")}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-5 text-sm text-neutral-500">
                       Select a patient from the queue or add a new patient to start an ASHA assessment.
                     </div>
                   )}
+                  </div>
 
                   {showPatientForm && (
-                    <div className="grid gap-3 rounded-2xl border border-neutral-200 bg-white/80 p-4 sm:grid-cols-2">
+                    <div className="rounded-[28px] border border-white/55 bg-white/70 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-neutral-900">Add Patient</p>
+                          <p className="text-[11px] text-neutral-500">Create a new record in the ASHA queue</p>
+                        </div>
+                      </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <input
                         value={patientForm.name}
                         onChange={e => handlePatientFormChange("name", e.target.value)}
@@ -1039,6 +1205,7 @@ export default function Chat() {
                           {creatingPatient ? "Creating..." : "Create Patient"}
                         </button>
                       </div>
+                    </div>
                     </div>
                   )}
                 </div>

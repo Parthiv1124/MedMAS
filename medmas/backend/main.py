@@ -17,6 +17,7 @@ from services.asha_service import (
     get_patient_queue, add_patient,
     save_field_assessment, update_patient_status,
     get_assessment_history,
+    get_selected_patient_id, set_selected_patient_id,
 )
 from config import (
     supabase,
@@ -611,6 +612,11 @@ class AddPatientRequest(BaseModel):
     priority:       int = 1
     notes:          str = ""
 
+
+class ASHASelectedPatientRequest(BaseModel):
+    asha_worker_id: str
+    patient_id: Optional[str] = None
+
 # ── Phase 3 ASHA Endpoints ────────────────────────────────────────────────
 @app.get("/api/asha/queue/{worker_id}")
 def get_queue(worker_id: str):
@@ -646,6 +652,25 @@ def create_patient(req: AddPatientRequest):
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(500, f"Unable to create patient: {e}")
+
+
+@app.get("/api/asha/selected-patient/{worker_id}")
+def get_selected_patient(worker_id: str):
+    """Get the server-persisted selected patient for an ASHA worker."""
+    try:
+        return {"patient_id": get_selected_patient_id(worker_id)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/asha/selected-patient")
+def set_selected_patient(req: ASHASelectedPatientRequest):
+    """Persist the selected patient for an ASHA worker."""
+    try:
+        set_selected_patient_id(req.asha_worker_id, req.patient_id)
+        return {"ok": True, "patient_id": req.patient_id}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
 
 @app.post("/api/asha/assess")
 async def asha_assess(req: ASHAAssessRequest):

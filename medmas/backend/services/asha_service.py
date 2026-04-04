@@ -92,3 +92,39 @@ def get_assessment_history(patient_id: str) -> list:
         .execute()
     )
     return result.data
+
+
+def get_selected_patient_id(asha_worker_id: str) -> str | None:
+    """Get the server-persisted selected patient for an ASHA worker."""
+    _check_supabase()
+    try:
+        result = (
+            supabase_db.table("users")
+            .select("selected_patient_id")
+            .eq("id", asha_worker_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        raise RuntimeError(
+            "Unable to read selected patient from Supabase. Add a nullable "
+            "`selected_patient_id` column to the `users` table."
+        ) from e
+
+    if not result.data:
+        return None
+    return result.data[0].get("selected_patient_id")
+
+
+def set_selected_patient_id(asha_worker_id: str, patient_id: str | None):
+    """Persist the selected patient for an ASHA worker."""
+    _check_supabase()
+    try:
+        supabase_db.table("users").update(
+            {"selected_patient_id": patient_id or None}
+        ).eq("id", asha_worker_id).execute()
+    except Exception as e:
+        raise RuntimeError(
+            "Unable to save selected patient to Supabase. Add a nullable "
+            "`selected_patient_id` column to the `users` table."
+        ) from e
