@@ -1408,6 +1408,14 @@ def get_case_prescriptions(case_id: str):
 def get_patient_prescriptions(patient_id: str):
     return {"prescriptions": get_prescriptions_for_patient(patient_id)}
 
+@app.get("/")
+def root():
+    return {"message": "MedMAS Backend Running 🚀"}
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 
 # ── Consent Management ───────────────────────────────────────────────────
 
