@@ -237,6 +237,8 @@ export default function Chat() {
     notes: "",
   });
   const bottomRef                         = useRef(null);
+  const messagesRef = useRef([]);
+  const requestInFlightRef = useRef(false);
 
   // Sidebar / session state
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -296,6 +298,7 @@ export default function Chat() {
   }
 
   useEffect(() => {
+    messagesRef.current = messages;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -494,6 +497,8 @@ export default function Chat() {
   }
 
   async function sendMessage(text, files = []) {
+    if (requestInFlightRef.current) return;
+
     const filePreviews = files.map((f) => ({
       name: f.name,
       type: f.type.startsWith("image/") ? "image" : "document",
@@ -502,16 +507,14 @@ export default function Chat() {
 
     const userMsgId = Date.now();
     const userMsg = { id: userMsgId, role: "user", text, files: filePreviews };
+    const history = buildChatHistory(messagesRef.current);
 
-    // Snapshot history BEFORE adding the new user message
-    setMessages(prev => {
-      const history = buildChatHistory(prev);
-      _doSendMessage(userMsg, files, filePreviews, history);
-      return [...prev, userMsg];
-    });
+    setMessages(prev => [...prev, userMsg]);
+    void _doSendMessage(userMsg, files, filePreviews, history);
   }
 
   async function _doSendMessage(userMsg, files, filePreviews, chatHistory) {
+    requestInFlightRef.current = true;
     const { text } = userMsg;
     // Ensure we have a session before hitting the API
     let sessionId = currentSessionRef.current;
@@ -580,10 +583,15 @@ export default function Chat() {
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
-    } finally { setLoading(false); }
+    } finally {
+      requestInFlightRef.current = false;
+      setLoading(false);
+    }
   }
 
   async function sendASHA(text) {
+    if (requestInFlightRef.current) return;
+
     if (!ashaWorkerId) {
       queueAssistantError("Sign in as an ASHA worker before using ASHA Copilot.");
       return;
@@ -594,8 +602,8 @@ export default function Chat() {
       return;
     }
 
-    setMessages(prev => [...prev, { id: Date.now(), role: "user", text: `[ASHA] ${text}` }]);
     const userMsg = { id: Date.now(), role: "user", text: `[ASHA] ${text}` };
+    const history = buildChatHistory(messagesRef.current);
 
     // Ensure session exists
     let sessionId = currentSessionRef.current;
@@ -617,14 +625,12 @@ export default function Chat() {
       });
     }
 
-    setMessages(prev => {
-      const history = buildChatHistory(prev);
-      _sendASHARequest(text, userMsg, sessionId, history);
-      return [...prev, userMsg];
-    });
+    setMessages(prev => [...prev, userMsg]);
+    void _sendASHARequest(text, userMsg, sessionId, history);
   }
 
   async function _sendASHARequest(text, userMsg, sessionId, chatHistory) {
+    requestInFlightRef.current = true;
     setLoading(true);
     setActiveAgent("ASHA Copilot");
 
@@ -654,7 +660,10 @@ export default function Chat() {
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: "assistant", text: "Error: " + err.message }]);
       setActiveAgent(null);
-    } finally { setLoading(false); }
+    } finally {
+      requestInFlightRef.current = false;
+      setLoading(false);
+    }
   }
 
   async function transcribeAudio(blob) {
@@ -674,6 +683,7 @@ export default function Chat() {
   }
 
   function handleSend(text, files = []) {
+    if (loading || requestInFlightRef.current) return;
     if (!text.trim() && files.length === 0) return;
     tab === "asha" ? sendASHA(text) : sendMessage(text, files);
   }
@@ -1132,6 +1142,8 @@ export default function Chat() {
                 const visibleText = getVisibleMessageText(msg.text, msg.doctors);
                 const symptom = msg.symptomResult;
                 const structuredSymptoms = symptom?.structured_symptoms;
+                const asha = msg.asha;
+                const documentation = asha?.documentation;
 
                 return (
                   <motion.div
