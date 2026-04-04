@@ -16,7 +16,9 @@
       "Bash(venv/Scripts/python -c \"import langchain_openai; print\\(langchain_openai.__version__\\)\")",
       "Bash(venv/Scripts/pip install:*)",
       "Bash(git stash:*)",
-      "Bash(npx vite:*)"
+      "Bash(npx vite:*)",
+      "WebFetch(domain:www.sixtyfour.ai)",
+      "Bash(pkill -f \"vite\")"
     ]
   }
 }

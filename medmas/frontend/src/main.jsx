@@ -5,6 +5,7 @@ import App from "./App.jsx";
 import Login from "./pages/Login.jsx";
 import Signup from "./pages/Signup.jsx";
 import Chat from "./pages/Chat.jsx";
+import LandingPage from "./pages/LandingPage.jsx";
 import "./index.css";
 
 function ProtectedRoute({ children }) {
@@ -15,7 +16,7 @@ function ProtectedRoute({ children }) {
 
 function GuestRoute({ children }) {
   const token = localStorage.getItem("medmas_token");
-  if (token) return <Navigate to="/" replace />;
+  if (token) return <Navigate to="/chat" replace />;
   return children;
 }
 
@@ -23,14 +24,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Chat />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/" element={<LandingPage />} />
         <Route
           path="/login"
           element={
