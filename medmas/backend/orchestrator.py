@@ -258,9 +258,12 @@ Respond politely and helpfully in 2-3 sentences:
 2. Gently let them know you're a health assistant and can't help with that topic.
 3. Suggest what they CAN ask you about (symptoms, lab reports, mental health, lifestyle, health score).
 
-Keep it friendly, warm, and encouraging. Do NOT be rude or dismissive.
-If the user said "hi" or "hello", welcome them and tell them what you can do.
-Respond in the same language the user used if possible."""
+IMPORTANT: 
+- If the query is in a language you don't understand, or is just a greeting like "hi" or "hello", 
+  respond with a warm welcome in English: "Hello! I'm MedMAS, your AI health assistant for rural India. 
+  I can help with symptoms, lab reports, mental health, and more. How can I help you today?"
+- Do NOT repeat the user's query back to them.
+- Keep it friendly, warm, and encouraging. Do NOT be rude or dismissive."""
 
 def offtopic_responder_node(state: MedMASState) -> dict:
     """Handles non-medical queries with a friendly redirect."""
@@ -641,10 +644,14 @@ def build_graph() -> StateGraph:
         }
     )
 
-    # Every agent → session_memory → doctor_finder → aggregator → output
-    for agent in ["symptom_checker", "disease_predictor", "empathy_chatbot",
-                  "health_scorer", "asha_copilot", "offtopic_responder"]:
+    # Medical agents → session_memory → doctor_finder → aggregator → output
+    medical_agents = ["symptom_checker", "disease_predictor", "empathy_chatbot",
+                      "health_scorer", "asha_copilot"]
+    for agent in medical_agents:
         graph.add_edge(agent, "session_memory")
+
+    # Offtopic responder → skip doctor_finder → go directly to aggregator
+    graph.add_edge("offtopic_responder", "response_aggregator")
 
     graph.add_edge("doctor_finder", "response_aggregator")
     graph.add_edge("session_memory",      "doctor_finder")

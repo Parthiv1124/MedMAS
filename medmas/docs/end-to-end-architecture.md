@@ -13,6 +13,8 @@ It is focused on:
 - LangGraph orchestration behavior
 - location and provider discovery
 - data and retrieval boundaries
+- user-specific workflows (Patient, ASHA Worker, Doctor)
+- consult-a-doctor and prescription systems
 - main architectural gaps
 - future-state direction
 
@@ -20,7 +22,7 @@ It is focused on:
 
 MedMAS currently consists of:
 
-- a React frontend
+- a React frontend with three distinct user portals
 - a FastAPI backend
 - a LangGraph orchestration layer in `backend/orchestrator.py`
 - specialist health agents
@@ -36,6 +38,16 @@ The most important architectural reality today is:
 `the system is orchestrated, but most requests still run through one primary specialist path rather than a truly collaborative multi-agent workflow`
 
 One notable exception is that the Symptom Checker is no longer a single-shot prompt. It now has an internal multi-step pipeline while still appearing as one specialist node in the top-level graph.
+
+## User Types and Roles
+
+MedMAS serves three distinct user types:
+
+| User Type | Role Description | Key Features |
+|-----------|-----------------|--------------|
+| **Patient** | General health-seeking user | Symptom analysis, doctor lookup, consultation request |
+| **ASHA Worker** | Community health field worker | Patient queue management, field assessment, AI triage |
+| **Doctor** | Healthcare provider | Case management, patient communication, prescriptions |
 
 ## High-Level System Architecture
 
@@ -114,14 +126,13 @@ This is mainly a maintainability and contributor-experience problem.
 
 ## Frontend Architecture
 
-### Current active frontend
+### Current Active Frontends
 
-The active product surface is `frontend/src/pages/Chat.jsx`.
+The system now has three distinct frontend portals:
 
-It currently owns:
-
-- patient and ASHA modes
-- message state
+#### 1. Patient Portal - Chat.jsx
+- patient and ASHA modes (tab-switchable)
+- message state with session management
 - district list loading
 - browser geolocation
 - browser microphone capture via `MediaRecorder`
@@ -129,9 +140,24 @@ It currently owns:
 - geocode fallback messaging
 - chat request submission
 - triage and doctor-card rendering
+- consult-a-doctor inline flow
 - local auth state from `localStorage`
+- Supabase-backed session persistence
 
-### Frontend runtime flow
+#### 2. Doctor Portal - DoctorDashboard.jsx
+- case queue management
+- unassigned case browsing
+- case detail view with chat thread
+- prescription writing
+- status transitions (assign → accept → start → complete → close)
+
+#### 3. Authentication Pages
+- Signup.jsx - Patient registration
+- Login.jsx - Patient login
+- DoctorSignup.jsx - Doctor registration
+- DoctorLogin.jsx - Doctor login
+
+### Frontend Runtime Flow - Patient
 
 ```mermaid
 flowchart TD
@@ -150,20 +176,63 @@ flowchart TD
     K --> L
     L --> M[Receive structured response]
     M --> N[Render answer triage and doctors]
+    M --> O[Render symptom result details]
+    M --> P[Show consult doctor option]
 ```
 
-### Frontend assessment
+### Frontend Runtime Flow - ASHA Worker
+
+```mermaid
+flowchart TD
+    A[Switch to ASHA tab] --> B[Load patient queue from API]
+    B --> C[GET /api/asha/queue/{worker_id}]
+    C --> D[Display patient list]
+    D --> E[Select patient from queue]
+    E --> F[Load assessment history]
+    F --> G[GET /api/asha/history/{patient_id}]
+    G --> H[Display previous assessments]
+    H --> I[Enter field observations]
+    I --> J[POST /api/asha/assess]
+    J --> K[AI returns triage and recommendations]
+    K --> L[Display ASHA result with actions]
+    L --> M[Option to create new patient]
+```
+
+### Frontend Runtime Flow - Doctor
+
+```mermaid
+flowchart TD
+    A[Doctor logs in] --> B[Load dashboard]
+    B --> C[Fetch assigned cases]
+    C --> D[GET /api/cases/doctor/{doctor_id}]
+    D --> E[Display case list]
+    E --> F[Select case from queue]
+    F --> G[View case details]
+    G --> H[View symptoms summary and AI suggestion]
+    H --> I[View consultation thread]
+    I --> J[Send message to patient]
+    J --> K[POST /api/cases/{id}/messages]
+    K --> L[Write prescription]
+    L --> M[POST /api/prescriptions]
+    M --> N[Transition case status]
+    N --> O[Accept/Start/Complete/Close]
+```
+
+### Frontend Assessment
 
 Strengths:
 
-- straightforward user flow
+- clear user-specific flows
 - graceful location fallback
 - backend returns UI-usable metadata
 - voice input is now supported without changing the main chat contract
+- session-based chat with Supabase persistence
+- consult-a-doctor inline flow
+- prescription system for doctors
 
 Weaknesses:
 
-- `Chat.jsx` is too large
+- `Chat.jsx` is too large (~1300 lines)
 - there is no dedicated frontend API layer
 - there is no separation between location, voice, chat, and rendering concerns
 
@@ -176,10 +245,15 @@ Recommended split:
 - `components/chat/Composer`
 - `components/chat/DoctorCards`
 - `components/chat/StatusBanner`
+- `components/chat/ConsultDoctor`
+- `components/asha/PatientQueue`
+- `components/asha/AssessmentHistory`
+- `components/doctor/CaseList`
+- `components/doctor/PrescriptionForm`
 
 ## Backend Architecture
 
-### Current backend
+### Current Backend
 
 The backend entrypoint is `backend/main.py`.
 
@@ -190,20 +264,25 @@ The orchestration and state contracts live separately in:
 
 It currently owns:
 
-- chat endpoint
-- lab upload endpoint
-- audio transcription endpoint
-- doctor endpoint
-- nearby doctor endpoint
-- geocode and district endpoints
-- crisis resource endpoint
-- OTP endpoints
-- signup and login
+- chat endpoint (`/api/chat`)
+- chat with file upload (`/api/chat/upload`)
+- session management (`/api/chat/sessions`)
+- consultation management (`/api/chat/consultation`)
+- case management (`/api/cases`)
+- lab upload endpoint (`/api/lab`)
+- audio transcription endpoint (`/api/transcribe`)
+- doctor endpoint (`/api/doctors`)
+- nearby doctor endpoint (`/api/doctors/nearby`)
+- geocode and district endpoints (`/api/geocode`, `/api/districts`)
+- crisis resource endpoint (`/api/crisis`)
+- OTP endpoints (`/api/auth/otp/*`)
+- signup and login (`/api/auth/signup`, `/api/auth/login`)
 - reminder and health-score endpoints
-- history endpoint
-- ASHA endpoints
+- history endpoint (`/api/history`)
+- ASHA endpoints (`/api/asha/*`)
+- prescription endpoints (`/api/prescriptions`)
 
-### Backend assessment
+### Backend Assessment
 
 This is the largest maintainability issue in the repo.
 
@@ -220,6 +299,8 @@ backend/
       auth.py
       location.py
       doctors.py
+      cases.py
+      prescriptions.py
       reminders.py
       history.py
       asha.py
@@ -237,7 +318,7 @@ backend/
 
 ## Orchestration Architecture
 
-### Current graph
+### Current Graph
 
 ```mermaid
 flowchart TD
@@ -266,7 +347,7 @@ flowchart TD
     M --> N[final response]
 ```
 
-### Current behavior
+### Current Behavior
 
 The system is:
 
@@ -306,11 +387,11 @@ Speech-to-text is currently outside the LangGraph path. It happens before `/api/
 - no synthesis layer across specialist outputs
 - request-scoped memory only
 
-## End-to-End Chat Flow
+## End-to-End Chat Flow - Patient
 
 ```mermaid
 sequenceDiagram
-    participant U as User
+    participant U as Patient
     participant FE as Frontend
     participant API as FastAPI
     participant ORCH as LangGraph
@@ -350,6 +431,25 @@ sequenceDiagram
     FE-->>U: render answer and metadata
 ```
 
+## Consult-A-Doctor Flow
+
+```mermaid
+sequenceDiagram
+    participant U as Patient
+    participant FE as Frontend
+    participant API as FastAPI
+    participant DB as Supabase
+
+    U->>FE: Click "Consult Doctor" on symptom response
+    FE->>FE: Show consent modal
+    U->>FE: Confirm consent (chat only or + records)
+    FE->>API: POST /api/cases
+    API->>DB: Create case with consent_scope
+    DB-->>API: case created
+    API-->>FE: case with status "requested"
+    FE->>FE: Show "Case Created" confirmation
+```
+
 ## End-to-End Voice Chat Flow
 
 ```mermaid
@@ -383,13 +483,85 @@ sequenceDiagram
 - STT is provider-backed, but intentionally decoupled from the LangGraph runtime
 - the transcript becomes plain chat input after transcription completes
 
-### Core takeaway
+## ASHA Worker Flow
 
-Today, MedMAS behaves like:
+```mermaid
+sequenceDiagram
+    participant AW as ASHA Worker
+    participant FE as Frontend
+    participant API as FastAPI
+    participant ORCH as LangGraph
+    participant DB as Supabase
 
-`router -> one specialist -> shared memory -> doctor lookup -> response aggregation -> translation`
+    AW->>FE: Log in as ASHA worker
+    FE->>API: GET /api/asha/queue/{worker_id}
+    API-->>FE: patient list
+    FE->>FE: Display patient queue
+    AW->>FE: Select patient from queue
+    FE->>API: GET /api/asha/history/{patient_id}
+    API-->>FE: previous assessments
+    AW->>FE: Enter field observations
+    FE->>API: POST /api/asha/assess
+    API->>ORCH: run_ashta_pipeline
+    ORCH-->>API: triage result
+    API-->>FE: AI assessment with recommendations
+    FE->>FE: Display triage, suggested doctors, actions
+    AW->>FE: Click "Create Patient" for new patient
+    FE->>API: POST /api/asha/patient
+    API->>DB: Create patient record
+```
 
-That is a good prototype architecture, but not yet a mature multi-agent platform architecture.
+### ASHA API Endpoints
+
+- `GET /api/asha/queue/{worker_id}` - Fetch patient queue
+- `POST /api/asha/patient` - Create new patient
+- `GET /api/asha/history/{patient_id}` - Get patient assessment history
+- `POST /api/asha/assess` - Submit field observations for AI assessment
+- `GET /api/asha/selected-patient/{worker_id}` - Get currently selected patient
+- `POST /api/asha/selected-patient` - Persist selected patient
+
+## Doctor Dashboard Flow
+
+```mermaid
+sequenceDiagram
+    participant D as Doctor
+    participant FE as Frontend
+    participant API as FastAPI
+    participant DB as Supabase
+
+    D->>FE: Log in as doctor
+    FE->>API: GET /api/cases/doctor/{doctor_id}
+    API-->>FE: assigned cases
+    FE->>FE: Display case queue
+    D->>FE: Select case from queue
+    FE->>API: GET /api/cases/{case_id}
+    API-->>FE: case details, messages, prescriptions
+    D->>FE: View symptoms summary and AI suggestion
+    D->>FE: Click "Accept" to accept case
+    FE->>API: POST /api/cases/{case_id}/accept
+    D->>FE: Send message to patient
+    FE->>API: POST /api/cases/{case_id}/messages
+    D->>FE: Click "Write Prescription"
+    FE->>FE: Open prescription modal
+    D->>FE: Fill diagnosis, medications, instructions
+    FE->>API: POST /api/prescriptions
+    API->>DB: Save prescription
+    D->>FE: Click "Mark Completed"
+    FE->>API: POST /api/cases/{case_id}/complete
+```
+
+### Doctor API Endpoints
+
+- `GET /api/cases/doctor/{doctor_id}` - Get doctor's assigned cases
+- `GET /api/cases/unassigned` - Browse open cases
+- `GET /api/cases/{case_id}` - Get case details
+- `POST /api/cases/{case_id}/assign` - Assign case to doctor
+- `POST /api/cases/{case_id}/accept` - Accept case
+- `POST /api/cases/{case_id}/start` - Start consultation
+- `POST /api/cases/{case_id}/complete` - Complete consultation
+- `POST /api/cases/{case_id}/close` - Close case
+- `POST /api/cases/{case_id}/messages` - Send message
+- `POST /api/prescriptions` - Write prescription
 
 ## Agent Layer
 
@@ -434,7 +606,7 @@ flowchart TD
     G --> J[symptom_result]
 ```
 
-### Current internal stages
+### Current Internal Stages
 
 The new Symptom Checker now performs:
 
@@ -446,7 +618,7 @@ The new Symptom Checker now performs:
 6. triage synthesis
 7. specialty and doctor lookup
 
-### New symptom output shape
+### New Symptom Output Shape
 
 The returned `symptom_result` now contains richer fields such as:
 
@@ -554,6 +726,13 @@ Current flow:
 - login uses Supabase password auth
 - frontend stores token in localStorage
 - backend writes health logs to Supabase
+- session-based chat persistence via Supabase
+
+### Auth User Types
+
+1. **Patient/User**: Email + password login via Supabase
+2. **ASHA Worker**: Phone + OTP login, linked to patient queue
+3. **Doctor**: Email + password login, verified status tracked
 
 ### Assessment
 
@@ -577,7 +756,10 @@ As of the current implementation, the main user-visible capabilities are:
 - doctor lookup with OSM-first fallback
 - lab PDF upload analysis
 - ASHA field assessment workflow
+- consult-a-doctor case creation
+- prescription writing for doctors
 - OTP-backed signup and Supabase login
+- session-based chat persistence
 - reminders and history APIs
 
 ## Testing Status
@@ -600,11 +782,12 @@ This is still unit-test-level coverage, but it is an improvement over the earlie
 2. `backend/main.py` is too broad
 3. runtime is mostly single-primary-agent
 4. retrieval architecture needs stronger versioning
-5. frontend chat page is too large
+5. frontend chat page is too large (~1300 lines)
 6. memory and state are still request-scoped in practice
 7. speech-to-text is integrated, but still lacks retries, fallbacks, and transcript confidence handling
 8. the new Symptom Checker pipeline still needs deeper integration tests and follow-up-question workflows
 9. platform engineering discipline is thin
+10. no dedicated hooks/components for frontend API layer
 
 ## Recommended Improvement Roadmap
 
@@ -638,6 +821,13 @@ This is still unit-test-level coverage, but it is an improvement over the earlie
 2. rank providers by distance
 3. enrich provider data
 4. add stronger ASHA and longitudinal patient workflows
+
+### Phase 5: Frontend organization
+
+1. Extract hooks for API calls
+2. Create reusable components
+3. Add route protection
+4. Centralize auth state management
 
 ## Target Future-State Architecture
 
@@ -685,6 +875,8 @@ MedMAS already has the correct product primitives:
 - multilingual support
 - provider discovery
 - ASHA workflow
+- consult-a-doctor system
+- prescription management
 
 The next improvement should focus on:
 
@@ -692,6 +884,7 @@ The next improvement should focus on:
 - stabilized retrieval and provider boundaries
 - deeper orchestration with synthesis
 - stronger auth, state, and platform engineering discipline
+- frontend code organization
 
 Current state:
 
@@ -700,4 +893,3 @@ Current state:
 Desired state:
 
 `modular, team-safe, synthesis-driven health platform`
-
