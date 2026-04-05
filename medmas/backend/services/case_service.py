@@ -143,6 +143,20 @@ def list_cases_for_doctor(doctor_id: str) -> list:
     return result.data or []
 
 
+def list_closed_cases_for_doctor(doctor_id: str) -> list:
+    """Closed cases for a doctor — history view."""
+    _check_supabase()
+    result = (
+        supabase_db.table("cases")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .eq("status", "closed")
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    return result.data or []
+
+
 def list_unassigned_cases(specialty: str = "", district: str = "") -> list:
     """Cases waiting to be assigned (status = requested)."""
     _check_supabase()

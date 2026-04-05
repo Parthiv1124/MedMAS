@@ -335,6 +335,7 @@ export default function Chat() {
   const [consultationReplyError, setConsultationReplyError] = useState("");
 
   const bottomRef                         = useRef(null);
+  const chatContainerRef                  = useRef(null);
   const messagesRef = useRef([]);
   const requestInFlightRef = useRef(false);
   const selectedPatientSyncReadyRef = useRef(false);
@@ -582,7 +583,13 @@ export default function Chat() {
 
   useEffect(() => {
     messagesRef.current = messages;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = chatContainerRef.current;
+    if (container) {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+      if (isNearBottom) {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -1234,7 +1241,7 @@ export default function Chat() {
         </AnimatePresence>
 
       {/* Messages */}
-      <div className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-4 sm:pt-5">
+      <div ref={chatContainerRef} className="z-10 flex w-full flex-1 flex-col items-center overflow-y-auto pt-4 sm:pt-5">
         <div className="flex w-full max-w-5xl flex-col gap-4 px-3 pb-24 sm:px-4 sm:pb-28">
 
           {tab === "asha" && (
