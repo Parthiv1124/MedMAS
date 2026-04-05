@@ -41,7 +41,7 @@ def register_doctor(
         "license_number": license_number,
         "district":       district,
         "bio":            bio,
-        "status":         "pending",
+        "status":         "verified",
     }).execute()
     return result.data[0] if result.data else {}
 

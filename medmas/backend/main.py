@@ -71,6 +71,101 @@ import pandas as pd
 import logging
 
 LOGGER = logging.getLogger("medmas.api")
+
+
+# ── SMS Alert Helpers ────────────────────────────────────────────────────
+
+def _get_user_phone(user_id: str) -> str | None:
+    """Look up a patient's phone number from the users table."""
+    if not supabase_db:
+        return None
+    try:
+        result = (
+            supabase_db.table("users")
+            .select("phone")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0]["phone"] if result.data else None
+    except Exception as e:
+        LOGGER.warning(f"Failed to fetch user phone: {e}")
+        return None
+
+
+def _get_doctor_phone(doctor_id: str) -> str | None:
+    """Look up a doctor's phone number from the doctors table."""
+    doctor = get_doctor_by_id(doctor_id)
+    return doctor.get("phone") if doctor else None
+
+
+def _get_doctor_name(doctor_id: str) -> str:
+    """Get doctor's name for SMS content."""
+    doctor = get_doctor_by_id(doctor_id)
+    return doctor.get("name", "Your doctor") if doctor else "Your doctor"
+
+
+def _notify_on_message(case_id: str, sender_type: str, sender_id: str, message_text: str):
+    """Send SMS alert to the other party when a message is sent."""
+    case = get_case(case_id)
+    if not case:
+        return
+
+    try:
+        if sender_type == "doctor":
+            # Doctor sent a message → notify the patient
+            patient_id = case.get("user_id")
+            if patient_id:
+                phone = _get_user_phone(patient_id)
+                doctor_name = _get_doctor_name(case.get("doctor_id", ""))
+                if phone:
+                    preview = message_text[:80] + ("..." if len(message_text) > 80 else "")
+                    sms_body = f"MedMAS: {doctor_name} sent you a message: \"{preview}\". Open the app to reply."
+                    send_sms(phone, sms_body)
+        elif sender_type == "patient":
+            # Patient sent a message → notify the doctor
+            doctor_id = case.get("doctor_id")
+            if doctor_id:
+                phone = _get_doctor_phone(doctor_id)
+                if phone:
+                    preview = message_text[:80] + ("..." if len(message_text) > 80 else "")
+                    sms_body = f"MedMAS: A patient sent you a message: \"{preview}\". Open the app to respond."
+                    send_sms(phone, sms_body)
+    except Exception as e:
+        LOGGER.warning(f"SMS alert failed for message in case {case_id}: {e}")
+
+
+def _notify_on_prescription(case_id: str, doctor_id: str, patient_id: str, diagnosis: str):
+    """Send SMS alert to the patient when a prescription is written."""
+    try:
+        phone = _get_user_phone(patient_id)
+        doctor_name = _get_doctor_name(doctor_id)
+        if phone:
+            sms_body = f"MedMAS: {doctor_name} has written a new prescription for you"
+            if diagnosis:
+                sms_body += f" (Diagnosis: {diagnosis})"
+            sms_body += ". Open the app to view details."
+            send_sms(phone, sms_body)
+    except Exception as e:
+        LOGGER.warning(f"SMS alert failed for prescription in case {case_id}: {e}")
+
+
+def _notify_doctor_on_case_assigned(case_id: str, doctor_id: str, patient_id: str, symptoms: str = ""):
+    """Send SMS to doctor with patient's phone number when a consultation is requested."""
+    try:
+        doctor_phone = _get_doctor_phone(doctor_id)
+        patient_phone = _get_user_phone(patient_id)
+        if doctor_phone and patient_phone:
+            sms_body = f"MedMAS: New consultation assigned to you. Patient phone: {patient_phone}"
+            if symptoms:
+                preview = symptoms[:80] + ("..." if len(symptoms) > 80 else "")
+                sms_body += f". Symptoms: {preview}"
+            sms_body += ". Open the app to review."
+            send_sms(doctor_phone, sms_body)
+    except Exception as e:
+        LOGGER.warning(f"SMS alert failed for case assignment {case_id}: {e}")
+
+
 if not LOGGER.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("[API] %(message)s"))
@@ -91,7 +186,25 @@ def _parse_json_field(raw: Optional[str], default):
     return value if isinstance(value, type(default)) else default
 
 
-def _build_assistant_meta(result: dict, *, is_asha: bool = False) -> dict:
+def _get_registered_doctors(result: dict, district: Optional[str]) -> list:
+    specialty = (
+        (result.get("symptom_result") or {}).get("recommended_specialty")
+        or ((result.get("symptom_result") or {}).get("triage") or {}).get("specialty")
+        or ""
+    )
+    if specialty:
+        doctors = match_doctors(specialty=specialty, district=district or "", limit=5)
+        if doctors:
+            return doctors
+    return list_doctors(district=district or "", verified_only=True)[:5]
+
+
+def _build_assistant_meta(
+    result: dict,
+    *,
+    is_asha: bool = False,
+    registered_doctors: Optional[list] = None,
+) -> dict:
     meta = {
         "triage": result.get("triage_level", "routine"),
         "intent": "asha" if is_asha else result.get("intent", ""),
@@ -104,6 +217,8 @@ def _build_assistant_meta(result: dict, *, is_asha: bool = False) -> dict:
         meta["symptomResult"] = result.get("symptom_result")
     if result.get("asha_result"):
         meta["asha"] = result.get("asha_result")
+    if registered_doctors:
+        meta["registeredDoctors"] = registered_doctors
     return meta
 
 
@@ -143,10 +258,19 @@ def _sort_by_created_at(rows: list[dict], *, reverse: bool = False) -> list[dict
 
 
 def _build_session_consultation(user_id: Optional[str], session_id: Optional[str]) -> Optional[dict]:
-    if not user_id or not session_id:
+    if not user_id:
         return None
 
-    cases = list_cases_for_session(user_id, session_id)
+    cases = list_cases_for_session(user_id, session_id) if session_id else []
+    if not cases:
+        user_cases = list_cases_for_user(user_id)
+        active_cases = [case for case in user_cases if case.get("status") != "closed"]
+        cases = active_cases or user_cases
+        cases = sorted(
+            cases,
+            key=lambda case: case.get("updated_at") or case.get("created_at") or "",
+            reverse=True,
+        )[:5]
     if not cases:
         return None
 
@@ -256,6 +380,7 @@ class ChatResponse(BaseModel):
     triage_level:      str
     intent:            str
     doctor_list:       list = []
+    registered_doctors: list = []
     health_score:      Optional[int] = None
     crisis_detected:   bool = False
     symptom_result:    Optional[dict] = None
@@ -317,6 +442,12 @@ async def chat(req: ChatRequest):
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+    registered_doctors = []
+    try:
+        registered_doctors = _get_registered_doctors(result, req.user_district)
+    except Exception:
+        pass
+
     try:
         _persist_chat_turn(
             user_id=req.user_id,
@@ -327,7 +458,7 @@ async def chat(req: ChatRequest):
             user_content=req.message,
             user_meta={},
             assistant_content=result.get("final_response", ""),
-            assistant_meta=_build_assistant_meta(result),
+            assistant_meta=_build_assistant_meta(result, registered_doctors=registered_doctors),
         )
     except Exception:
         pass
@@ -344,6 +475,7 @@ async def chat(req: ChatRequest):
         triage_level=result.get("triage_level", "routine"),
         intent=result.get("intent", ""),
         doctor_list=result.get("doctor_list") or [],
+        registered_doctors=registered_doctors,
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
@@ -436,6 +568,12 @@ async def chat_upload(
     if result.get("health_result"):
         health_score = result["health_result"].get("total_score")
 
+    registered_doctors = []
+    try:
+        registered_doctors = _get_registered_doctors(result, user_district)
+    except Exception:
+        pass
+
     try:
         _persist_chat_turn(
             user_id=user_id,
@@ -446,7 +584,7 @@ async def chat_upload(
             user_content=message or "[Uploaded files]",
             user_meta={"files": uploaded_files_meta} if uploaded_files_meta else {},
             assistant_content=result.get("final_response", ""),
-            assistant_meta=_build_assistant_meta(result),
+            assistant_meta=_build_assistant_meta(result, registered_doctors=registered_doctors),
         )
     except Exception:
         pass
@@ -463,6 +601,7 @@ async def chat_upload(
         triage_level=result.get("triage_level", "routine"),
         intent=result.get("intent", ""),
         doctor_list=result.get("doctor_list") or [],
+        registered_doctors=registered_doctors,
         health_score=health_score,
         crisis_detected=result.get("crisis_detected", False),
         symptom_result=result.get("symptom_result"),
@@ -841,6 +980,19 @@ def get_chat_session_detail(user_id: str, session_id: str):
         raise HTTPException(503, str(e))
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+@app.get("/api/chat/consultation/{user_id}")
+def get_chat_consultation(user_id: str):
+    if not supabase:
+        raise HTTPException(503, "Supabase not configured")
+    try:
+        return {"consultation": _build_session_consultation(user_id, None)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 
 @app.delete("/api/chat/sessions/{user_id}/{session_id}")
 def remove_chat_session(user_id: str, session_id: str):
@@ -1240,6 +1392,8 @@ def create_new_case(req: CreateCaseRequest):
         # If a specific doctor was chosen, assign directly (requested → assigned)
         if req.doctor_id:
             case = assign_case(case["id"], req.doctor_id)
+            # SMS alert to doctor with patient's phone number
+            _notify_doctor_on_case_assigned(case["id"], req.doctor_id, req.user_id, req.symptoms_summary)
 
         # Auto-match doctors for informational display
         matched = match_doctors(
@@ -1311,6 +1465,11 @@ def assign_case_endpoint(case_id: str, req: CaseStatusRequest):
     """Assign a case to a doctor (requested → assigned)."""
     try:
         case = assign_case(case_id, req.doctor_id)
+        # SMS alert to doctor with patient's phone number
+        patient_id = case.get("user_id", "")
+        symptoms = case.get("symptoms_summary", "")
+        if req.doctor_id and patient_id:
+            _notify_doctor_on_case_assigned(case_id, req.doctor_id, patient_id, symptoms)
         return {"case": case}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -1361,6 +1520,8 @@ def post_message(case_id: str, req: SendMessageRequest):
     """Send a message in a case thread."""
     try:
         msg = send_message(case_id, req.sender_id, req.sender_type, req.message)
+        # SMS alert to the other party (fire-and-forget)
+        _notify_on_message(case_id, req.sender_type, req.sender_id, req.message)
         return {"message": msg}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -1392,6 +1553,8 @@ def create_new_prescription(req: PrescriptionRequest):
             instructions=req.instructions,
             follow_up_date=req.follow_up_date,
         )
+        # SMS alert to the patient (fire-and-forget)
+        _notify_on_prescription(req.case_id, req.doctor_id, req.patient_id, req.diagnosis)
         return {"prescription": rx}
     except RuntimeError as e:
         raise HTTPException(503, str(e))
