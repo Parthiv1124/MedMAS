@@ -48,6 +48,7 @@ class MedMASState(TypedDict):
     final_response:      str         # Back-translated to user language
     triage_level:        str         # "urgent" | "moderate" | "routine"
     error:               Optional[str]
+    translation_failed:  bool         # Flag for unsupported language fallback
 
 
 def initial_state(
@@ -100,4 +101,5 @@ def initial_state(
         final_response="",
         triage_level="routine",
         error=None,
+        translation_failed=False,
     )

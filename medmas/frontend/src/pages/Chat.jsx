@@ -147,19 +147,19 @@ const AGENT_INFO = {
 
 const TAB_STYLES = {
   chat: {
-    active: "border-sky-300/80 bg-gradient-to-r from-sky-500 to-cyan-400 text-white shadow-[0_10px_30px_rgba(14,165,233,0.28)]",
+    active: "border-sky-300/80 bg-gradient-to-r from-sky-500 to-cyan-400 text-white shadow-lg",
     dot: "bg-sky-100",
   },
   asha: {
-    active: "border-amber-300/80 bg-gradient-to-r from-amber-500 to-yellow-400 text-white shadow-[0_10px_30px_rgba(245,158,11,0.28)]",
+    active: "border-amber-300/80 bg-gradient-to-r from-amber-500 to-yellow-400 text-white shadow-lg",
     dot: "bg-amber-100",
   },
 };
 
 const TRIAGE = {
-  urgent: { bg: "bg-red-500/10", text: "text-red-400", border: "border-red-500/20", dot: "bg-red-500" },
-  moderate: { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20", dot: "bg-amber-500" },
-  routine: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20", dot: "bg-emerald-500" },
+  urgent: { bg: "bg-red-50", text: "text-red-600", border: "border-red-200", dot: "bg-red-500" },
+  moderate: { bg: "bg-amber-50", text: "text-amber-600", border: "border-amber-200", dot: "bg-amber-500" },
+  routine: { bg: "bg-emerald-50", text: "text-emerald-600", border: "border-emerald-200", dot: "bg-emerald-500" },
 };
 
 const MODELS = [
