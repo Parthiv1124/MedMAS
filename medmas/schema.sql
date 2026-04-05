@@ -4,12 +4,16 @@
 -- Core user table
 CREATE TABLE users (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name       TEXT DEFAULT '',
     phone      TEXT UNIQUE NOT NULL,
     lang_code  TEXT DEFAULT 'en',
     district   TEXT,
     state      TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- If the table already exists, add the name column:
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
 
 -- Health interaction logs
 CREATE TABLE health_logs (

@@ -46,7 +46,9 @@ export default function DoctorDashboard() {
   const [tab, setTab] = useState("queue");
   const [cases, setCases] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
+  const [closedCases, setClosedCases] = useState([]);
   const [activeCase, setActiveCase] = useState(null);
+  const [patientInfo, setPatientInfo] = useState(null);
   const [messages, setMessages] = useState([]);
   const [prescriptions, setPrescriptions] = useState([]);
   const [msgText, setMsgText] = useState("");
@@ -64,6 +66,7 @@ export default function DoctorDashboard() {
     if (!doctor) { navigate("/doctor/login"); return; }
     loadMyCases();
     loadUnassigned();
+    loadClosedCases();
   }, []);
 
   useEffect(() => {
@@ -89,12 +92,21 @@ export default function DoctorDashboard() {
     } catch { /* ignore */ }
   }
 
+  async function loadClosedCases() {
+    try {
+      const res = await fetch(`${API_BASE}/api/cases/doctor/${doctor.id}/closed`);
+      const data = await res.json();
+      setClosedCases(data.cases || []);
+    } catch { /* ignore */ }
+  }
+
   async function openCase(caseId) {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/cases/${caseId}`);
       const data = await res.json();
       setActiveCase(data.case);
+      setPatientInfo(data.patient_info || null);
       setMessages(data.messages || []);
       setPrescriptions(data.prescriptions || []);
       setTab("case");
@@ -124,6 +136,7 @@ export default function DoctorDashboard() {
       });
       openCase(activeCase.id);
       loadMyCases();
+      if (action === "close") loadClosedCases();
     } catch { /* ignore */ }
   }
 
@@ -256,7 +269,7 @@ export default function DoctorDashboard() {
                   ? "bg-gradient-to-r from-brand-600 to-teal-500 text-white shadow-md shadow-brand-500/20" 
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               }`}>
-              My Cases ({cases.length})
+              Active ({cases.length})
             </button>
             <button onClick={() => { setTab("unassigned"); loadUnassigned(); }}
               className={`flex-1 text-sm font-medium py-2.5 px-3 rounded-xl transition-all ${
@@ -266,10 +279,16 @@ export default function DoctorDashboard() {
               }`}>
               Open ({unassigned.length})
             </button>
+            <button onClick={() => { setTab("closed"); loadClosedCases(); }}
+              className={`flex-1 text-xs py-2 px-3 rounded-lg transition ${
+                tab === "closed" ? "bg-zinc-500/20 text-zinc-400" : "text-zinc-500 hover:text-zinc-300"
+              }`}>
+              Closed ({closedCases.length})
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-2">
-            {(tab === "queue" ? cases : tab === "unassigned" ? unassigned : cases).map((c) => (
+            {(tab === "queue" ? cases : tab === "unassigned" ? unassigned : tab === "closed" ? closedCases : cases).map((c) => (
               <button key={c.id}
                 onClick={() => tab === "unassigned" ? null : openCase(c.id)}
                 className={`w-full text-left p-4 rounded-2xl border-2 transition-all hover:shadow-md ${
