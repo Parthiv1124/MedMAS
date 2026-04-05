@@ -1,34 +1,38 @@
-# 🏥 MedMAS - Multi-Agent AI Health System for Rural India
+# 🏥 MedMAS - Multi-Agentic AI Healthcare Platform
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Type-B2B2C%20SaaS-blueviolet?style=for-the-badge" alt="Type">
   <img src="https://img.shields.io/badge/Stack-FastAPI%20%2B%20React%20%2B%20LangGraph-blueviolet?style=for-the-badge" alt="Stack">
   <img src="https://img.shields.io/badge/Models-Qwen3--VL%20%2B%20Llama3-FF6B6B?style=for-the-badge" alt="Models">
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/Status-Production%20Ready-brightgreen?style=for-the-badge" alt="Status">
 </p>
 
-> 🚀 **AI-Powered Healthcare for 1.4 Billion Indians** - A research-validated multi-agent platform designed for rural and underserved communities.
+> 🚀 **Enterprise-Grade Multi-Tenant AI Healthcare SaaS** — A multilingual, multi-agentic platform delivering intelligent healthcare automation across diverse customer segments.
 
 ---
 
-## 🎯 Why MedMAS?
+## 🎯 What is MedMAS?
 
-India faces a critical healthcare crisis:
-- **200M+** undetected diabetics and hypertension cases
-- **70%** of population lives in rural areas with limited doctor access
-- **1.5M** ASHA workers need AI assistance for doorstep healthcare delivery
+MedMAS is a **B2B2C Multi-Tenant AI SaaS Platform** designed to serve:
 
-MedMAS tackles this with **6 specialist AI agents** coordinated by a central orchestrator — delivering clinically accurate, culturally appropriate healthcare in 12+ Indian languages.
+| Segment | Description | Revenue Model |
+|---------|-------------|---------------|
+| 🏛️ **B2B - Healthcare Companies** | Hospitals, clinics, diagnostic chains, health tech companies | Enterprise subscriptions |
+| 🏥 **B2B - Government** | State/district health programs via ASHA workers | Government contracts |
+| 👤 **B2C - End Users** | Urban users seeking AI-powered health assistance | Freemium/Paid consultations |
+
+With **6 specialist AI agents** orchestrated by LangGraph, MedMAS delivers clinically accurate, multilingual healthcare automation in 14+ languages.
 
 ---
 
-## 🏆 Hackathon-Winning Features
+## 🏆 Platform Capabilities
 
 ### 🧠 Multi-Agent AI Architecture
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    MedMAS Orchestrator                          │
-│  (LangGraph-powered intelligent routing & coordination)        │
+│  (LangGraph-powered intelligent routing & coordination)         │
 └─────────────────────────────────────────────────────────────────┘
          │        │        │        │        │        │
          ▼        ▼        ▼        ▼        ▼        ▼
@@ -38,35 +42,56 @@ MedMAS tackles this with **6 specialist AI agents** coordinated by a central orc
     └─────────┘└─────────┘└─────────┘└─────────┘└─────────┘└─────────┘
 ```
 
-| Agent | Capability | Use Case |
-|-------|-----------|----------|
-| 🩺 **Symptom Checker** | ICMR-guideline symptom triage | "I have fever and chest pain" |
-| 📊 **Disease Predictor** | Lab report analysis & risk scoring | Upload PDF lab reports |
-| 💚 **Mental Health** | Empathy-driven emotional support | "I'm feeling stressed" |
-| ⚖️ **Health Scorer** | Lifestyle & habit analysis | "My diet is poor, help me improve" |
-| 👩‍🏫 **ASHA Copilot** | Frontline worker assistance | ASHA worker managing village health |
-| 🔍 **Doctor Finder** | Nearby doctor & facility discovery | "Find me a diabetes specialist" |
+| Agent | Capability | Enterprise Use Case |
+|-------|-----------|---------------------|
+| 🩺 **Symptom Checker** | ICMR-guideline symptom triage | Triage automation for hospitals |
+| 📊 **Disease Predictor** | Lab report analysis & risk scoring | Integrated diagnostics |
+| 💚 **Mental Health** | Empathy-driven emotional support | Employee wellness programs |
+| ⚖️ **Health Scorer** | Lifestyle & habit analysis | Insurance risk assessment |
+| 👩‍🏫 **ASHA Copilot** | Frontline worker assistance | Government health programs |
+| 🔍 **Doctor Finder** | Nearby doctor & facility discovery | Healthcare marketplace |
 
 ### 📄 Intelligent Lab Report Processing (VLM-Powered)
 - **Qwen3-VL-30B** vision model extracts lab values from PDF reports
 - Automated detection of 30+ lab parameters (HbA1c, glucose, cholesterol, etc.)
-- ICMR threshold-based risk flagging
-- Multi-language report support
+- ICMR/WHO threshold-based risk flagging
+- Enterprise integration via API
 
 ### 🗣️ Voice-First Accessibility
 - **Whisper-large-v3** for speech-to-text in 10+ Indian languages
 - Voice messages from users get transcribed and processed
-- Designed for low-bandwidth rural environments
+- Low-bandwidth optimized for tier-2/3 cities
 
 ### 🌐 True Multilingual Support
 - Real-time language detection (Hindi, Gujarati, Tamil, Bengali, Marathi, etc.)
 - Responses delivered in user's native language
 - Regional dialect understanding
+- 14+ languages supported
 
-### 📍 Location-Aware Healthcare
-- OpenStreetMap integration for nearby doctor discovery
-- Geocoding for remote village location mapping
-- District-based doctor referral system
+### 🏢 Multi-Tenant Architecture
+- Tenant isolation with role-based access
+- White-label ready for enterprise clients
+- Custom branding per tenant
+- Usage-based billing support
+
+---
+
+## 💼 Revenue Models
+
+### For Healthcare Companies (B2B)
+- **SaaS Subscription** - Monthly/annual platform access
+- **API Usage** - Pay-per-consultation pricing
+- **White-label** - Full brand customization
+
+### For Government Programs (B2B)
+- **Government Contracts** - State health department deployments
+- **ASHA Worker Integration** - Doorstep healthcare delivery
+- **Public Health Campaigns** - Disease monitoring & alerts
+
+### For End Users (B2C)
+- **Freemium** - Free basic consultations
+- **Premium** - AI specialist consultations
+- **Insurance Integration** - Partner with health insurers
 
 ---
 
@@ -88,6 +113,7 @@ MedMAS tackles this with **6 specialist AI agents** coordinated by a central orc
 - PostgreSQL (Supabase)
 - Qdrant Vector Store
 - OpenStreetMap APIs
+- DeepInfra GPU Inference
 
 ---
 
@@ -158,19 +184,20 @@ npm run dev
 | `/api/doctor/signup` | POST | Doctor registration |
 | `/api/doctor/login` | POST | Doctor authentication |
 | `/api/cases/doctor/{id}` | GET | List assigned cases |
+| `/api/prescriptions/suggest` | POST | AI prescription suggestion |
 
-### ASHA Worker APIs
+### Enterprise/Tenant APIs
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/asha/queue/{worker_id}` | GET | Patient queue |
-| `/api/asha/patient` | POST | Add patient |
-| `/api/asha/assess` | POST | Field assessment |
+| `/api/tenant/register` | POST | Register new tenant |
+| `/api/tenant/stats` | GET | Usage analytics |
+| `/api/asha/queue/{worker_id}` | GET | ASHA worker patient queue |
 
 ---
 
 ## 🏥 Demo Scenarios
 
-### Scenario 1: Symptom Analysis
+### Scenario 1: Symptom Analysis (B2C)
 ```
 User: "I have fever since 3 days and chest pain"
 → Symptom Checker routes to emergency triage
@@ -178,21 +205,31 @@ User: "I have fever since 3 days and chest pain"
 → Doctor Finder shows nearby cardiac specialists
 ```
 
-### Scenario 2: Lab Report Upload
+### Scenario 2: Lab Report Upload (B2B)
 ```
-User: Uploads PDF lab report
+User: Uploads PDF lab report via hospital portal
 → Qwen3-VL extracts: HbA1c: 8.5, Glucose: 180
 → Disease Predictor flags: High diabetes risk
 → Returns: Risk score, lifestyle recommendations
 → Doctor Finder suggests endocrinologist
 ```
 
-### Scenario 3: ASHA Worker Mode
+### Scenario 3: Government Health Program (B2B)
 ```
 ASHA: "A pregnant woman in my village needs checkup"
 → ASHA Copilot guides through assessment
 → Creates patient record in system
 → Flags high-risk cases for doctor review
+→ Data syncs to district health dashboard
+```
+
+### Scenario 4: Enterprise Triage (B2B)
+```
+Hospital System: API call with patient symptoms
+→ Symptom Checker runs clinical triage
+→ Returns urgency level + specialty recommendation
+→ Creates case for on-duty doctor
+→ Patient notified via SMS
 ```
 
 ---
@@ -231,41 +268,40 @@ medmas/
 
 ---
 
-## 🎯 Impact Metrics
+## 🎯 Target Market
 
-| Metric | Target | Achievement |
-|--------|--------|-------------|
-| Rural Coverage | 1000+ villages | 🔄 Scaling |
-| Response Time | <3 seconds | ✅ <2s avg |
-| Language Support | 12+ languages | ✅ 14 languages |
-| Clinical Accuracy | >85% | ✅ 90%+ |
-| Cost per Consult | <₹5 | ✅ Near-zero |
+| Market | Size | Approach |
+|--------|------|-----------|
+| Indian Healthcare Companies | $50B+ | Direct sales, partnerships |
+| Government Health Programs | $20B+ | Tender/contract process |
+| Urban End Users | 500M+ | Digital marketing, app stores |
+| International Markets | $500B+ | Future expansion |
 
 ---
 
-## 🔐 Clinical Safety
+## 🔐 Clinical Safety & Compliance
 
 - ✅ **No medical advice replaces doctor consultation**
 - ✅ All responses include disclaimer
 - ✅ Emergency cases flagged for immediate referral
-- ✅ ICMR guidelines baked into every agent
+- ✅ ICMR/WHO guidelines baked into every agent
 - ✅ Human-in-the-loop for critical decisions
+- ✅ HIPAA/SOC2 ready architecture
+- ✅ Data encryption at rest and in transit
 
 ---
 
-## 🤝 Contributing
+## 🤝 Partner With Us
 
-We welcome contributions! Please read our contributing guidelines and submit PRs.
+MedMAS is ready for enterprise deployment. Contact us for:
+- **API Integration** - Plug into your existing systems
+- **White-label Solutions** - Full brand customization
+- **Government Deployments** - State health program integration
+- **Healthcare Chains** - Multi-location hospital networks
 
 ```bash
-# Create feature branch
-git checkout -b feature/amazing-feature
-
-# Commit changes
-git commit -m "Add amazing feature"
-
-# Push to branch
-git push origin feature/amazing-feature
+# For partnership inquiries
+# Email: partners@medmas.ai
 ```
 
 ---
@@ -287,6 +323,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <strong>Made with ❤️ for Rural India</strong><br>
-  Building the future of accessible healthcare, one village at a time.
+  <strong>Built for the Future of Healthcare</strong><br>
+  Multi-tenant · Multilingual · Multi-Agentic AI Platform
 </p>
