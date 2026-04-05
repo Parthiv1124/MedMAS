@@ -39,6 +39,7 @@ from services.case_service import (
     list_cases_for_user,
     list_cases_for_session,
     list_cases_for_doctor,
+    list_closed_cases_for_doctor,
     list_unassigned_cases,
     assign_case,
     accept_case,
@@ -91,6 +92,25 @@ def _get_user_phone(user_id: str) -> str | None:
     except Exception as e:
         LOGGER.warning(f"Failed to fetch user phone: {e}")
         return None
+
+
+def _get_patient_info(user_id: str) -> dict:
+    """Look up patient name and phone from the users table."""
+    if not supabase_db:
+        return {"name": "", "phone": ""}
+    try:
+        result = (
+            supabase_db.table("users")
+            .select("name, phone")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return {"name": result.data[0].get("name", ""), "phone": result.data[0].get("phone", "")}
+    except Exception as e:
+        LOGGER.warning(f"Failed to fetch patient info: {e}")
+    return {"name": "", "phone": ""}
 
 
 def _get_doctor_phone(doctor_id: str) -> str | None:
@@ -326,6 +346,7 @@ def _sync_public_user(
     district: str = "",
     lang_code: str = "en",
     state: str = "",
+    name: str = "",
 ):
     """Ensure the public users table contains the current auth user."""
     if not supabase_db or not user_id:
@@ -338,6 +359,7 @@ def _sync_public_user(
     supabase_db.table("users").upsert(
         {
             "id": user_id,
+            "name": name or "",
             "phone": normalized_phone,
             "district": district,
             "lang_code": lang_code or "en",
@@ -865,6 +887,7 @@ async def signup(req: SignupRequest):
             user_id=auth_res.user.id,
             phone=req.phone,
             district=req.district,
+            name=req.name,
         )
         return {
             "access_token": auth_res.session.access_token if auth_res.session else "",
@@ -900,6 +923,7 @@ async def login(req: LoginRequest):
             district=user_meta.get("district", ""),
             lang_code=user_meta.get("lang_code", "en"),
             state=user_meta.get("state", ""),
+            name=user_meta.get("name", ""),
         )
         return {
             "access_token": auth_res.session.access_token,
@@ -1256,6 +1280,7 @@ async def doctor_signup(req: DoctorSignupRequest):
                 user_id=auth_res.user.id,
                 phone=req.phone,
                 district=req.district,
+                name=req.name,
             )
         except Exception as sync_err:
             print(f"[Doctor Signup] _sync_public_user non-fatal: {sync_err}")
@@ -1427,6 +1452,15 @@ def get_doctor_cases(doctor_id: str):
         raise HTTPException(503, str(e))
 
 
+@app.get("/api/cases/doctor/{doctor_id}/closed")
+def get_doctor_closed_cases(doctor_id: str):
+    """List closed cases for a doctor."""
+    try:
+        return {"cases": list_closed_cases_for_doctor(doctor_id)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+
+
 @app.get("/api/cases/unassigned")
 def get_unassigned_cases(specialty: str = "", district: str = ""):
     """List cases waiting to be assigned to a doctor."""
@@ -1438,7 +1472,7 @@ def get_unassigned_cases(specialty: str = "", district: str = ""):
 
 @app.get("/api/cases/{case_id}")
 def get_case_detail(case_id: str):
-    """Get full case detail including consent, messages, prescriptions."""
+    """Get full case detail including consent, messages, prescriptions, and patient info."""
     try:
         case = get_case(case_id)
         if not case:
@@ -1446,11 +1480,13 @@ def get_case_detail(case_id: str):
         consent = get_consent_for_case(case_id)
         messages = get_messages(case_id)
         prescriptions = get_prescriptions_for_case(case_id)
+        patient_info = _get_patient_info(case.get("user_id", ""))
         return {
             "case": case,
             "consent": consent,
             "messages": messages,
             "prescriptions": prescriptions,
+            "patient_info": patient_info,
         }
     except HTTPException:
         raise
