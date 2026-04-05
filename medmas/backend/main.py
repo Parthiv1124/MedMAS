@@ -48,9 +48,9 @@ from services.case_service import (
     close_case,
     send_message,
     get_messages,
+    get_consent_for_case,
     grant_consent,
     revoke_consent,
-    get_consent_for_case,
 )
 from services.prescription_service import (
     create_prescription,
@@ -64,9 +64,12 @@ from config import (
     DOCTORS_CSV_PATH,
     SPEECH_TO_TEXT_MODEL,
     openai_client,
+    llm,
 )
 from services.osm_doctor_finder import find_nearby_doctors
 from services.notifications import send_sms
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 import httpx
 import pandas as pd
 import logging
@@ -1606,6 +1609,85 @@ def get_case_prescriptions(case_id: str):
 @app.get("/api/prescriptions/patient/{patient_id}")
 def get_patient_prescriptions(patient_id: str):
     return {"prescriptions": get_prescriptions_for_patient(patient_id)}
+
+
+AI_RX_PROMPT = """You are an experienced Indian doctor. Based on the patient's case details below, suggest a prescription.
+
+Case Summary:
+- Patient symptoms/concerns: {symptoms}
+- Chat history: {chat_history}
+- Lab values (if any): {lab_values}
+- Current diagnosis (if any): {diagnosis}
+
+Generate a prescription in this JSON format only:
+{{
+  "diagnosis": "your diagnosis based on symptoms",
+  "medications": [
+    {{"name": "medicine name", "dosage": " dosage (e.g., 500mg)", "frequency": "e.g., twice daily", "duration": "e.g., 7 days"}}
+  ],
+  "instructions": "general instructions for the patient",
+  "follow_up_date": "recommended follow-up in days (e.g., 7)"
+}}
+
+Return ONLY valid JSON, no explanation."""
+
+
+@app.post("/api/prescriptions/suggest")
+def suggest_prescription(req: dict):
+    """AI generates prescription suggestion based on case data."""
+    try:
+        case_id = req.get("case_id")
+        if not case_id:
+            raise HTTPException(400, "case_id is required")
+        
+        case = get_case(case_id)
+        if not case:
+            raise HTTPException(404, "Case not found")
+        
+        messages = get_messages(case_id)
+        prescriptions = get_prescriptions_for_case(case_id)
+        
+        # Get symptoms from case fields or session_context
+        session_context = case.get("session_context") or {}
+        symptoms = session_context.get("symptoms", "") if session_context else ""
+        if not symptoms:
+            symptoms = case.get("symptoms_summary", "") or case.get("ai_suggestion", "")
+        
+        chat_history = "\n".join([f"Patient: {m.get('content','')[:200]}" for m in messages[-5:]]) if messages else ""
+        lab_values = session_context.get("lab_values", "") if session_context else ""
+        diagnosis = prescriptions[-1].get("diagnosis", "") if prescriptions else ""
+        
+        LOGGER.info(f"[AI-Rx] case_id={case_id} symptoms='{symptoms[:100] if symptoms else 'empty'}...' messages={len(messages)}")
+        
+        prompt = AI_RX_PROMPT.format(
+            symptoms=symptoms[:500] if symptoms else "No specific symptoms recorded",
+            chat_history=chat_history[:800] if chat_history else "No chat history",
+            lab_values=lab_values[:300] if lab_values else "No lab values",
+            diagnosis=diagnosis
+        )
+        
+        try:
+            from langchain_core.output_parsers import JsonOutputParser
+            chain = ChatPromptTemplate.from_template(prompt) | llm | JsonOutputParser()
+            suggestion = chain.invoke({})
+        except Exception as e:
+            LOGGER.warning(f"[AI-Rx] JsonOutputParser failed: {e}, trying raw")
+            raw_output = llm.invoke(prompt).content.strip()
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', raw_output)
+            if json_match:
+                suggestion = json.loads(json_match.group())
+            else:
+                suggestion = {"diagnosis": "", "medications": [], "instructions": "", "follow_up_date": "7"}
+        
+        LOGGER.info(f"[AI-Rx] suggestion: {suggestion}")
+        return {"suggestion": suggestion}
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.exception("suggest_prescription failed")
+        raise HTTPException(500, str(e))
+
 
 @app.get("/")
 def root():
